@@ -59,10 +59,7 @@ fn main() -> Result<()> {
     }
 
     init_logging();
-    info!(
-        "AI Limits Widget v{} starting...",
-        env!("CARGO_PKG_VERSION")
-    );
+    info!("QuotaBar Widget v{} starting...", env!("CARGO_PKG_VERSION"));
 
     app::run()
 }

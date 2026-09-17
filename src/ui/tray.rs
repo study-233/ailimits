@@ -1,4 +1,4 @@
-//! Tray and panel fallback both show the same Codex weekly remaining ring.
+//! Tray and panel fallback share the selected Codex quota style and periods.
 //! Bars is a config-only legacy usage view.
 
 use crate::config::schema::IndicatorKind;
@@ -14,21 +14,31 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 const ICON_SIZE: u32 = 32;
 
 pub struct Tray {
+    warning_remaining: f32,
+    last_icon_size: u32,
     appearance: crate::config::appearance::Appearance,
     mode: IndicatorKind,
     icon: Option<TrayIcon>,
     /// Last drawn integer % per provider row (a single entry in Tray mode),
     /// so we skip redraws when nothing changed.
     last: Vec<Option<u8>>,
+    quota_cache: Option<(Vec<super::weekly::WeeklyQuota>, bool)>,
     /// Re-run icon promotion on the next update: Explorer may create the
     /// NotifyIconSettings registry keys a moment after the icon appears.
     promote_pending: bool,
 }
 
 impl Tray {
-    pub fn set_appearance(&mut self, appearance: crate::config::appearance::Appearance) {
+    pub fn set_appearance(&mut self, mut appearance: crate::config::appearance::Appearance) {
+        appearance.normalize();
         self.appearance = appearance;
         self.last.clear();
+        self.quota_cache = None;
+    }
+
+    pub fn set_warning_threshold(&mut self, used: u8) {
+        self.warning_remaining = 100.0 - used.min(100) as f32;
+        self.quota_cache = None;
     }
 
     pub fn replace_menu(&self, menu: &muda::Menu) {
@@ -38,10 +48,13 @@ impl Tray {
     }
     pub fn new() -> Self {
         Self {
+            warning_remaining: 20.0,
+            last_icon_size: 0,
             appearance: crate::config::appearance::Appearance::default(),
             mode: IndicatorKind::Off,
             icon: None,
             last: Vec::new(),
+            quota_cache: None,
             promote_pending: false,
         }
     }
@@ -57,6 +70,7 @@ impl Tray {
         if !matches!(mode, IndicatorKind::Tray | IndicatorKind::Bars) {
             self.icon = None;
             self.last.clear();
+            self.quota_cache = None;
             self.mode = mode;
             return true;
         }
@@ -66,7 +80,7 @@ impl Tray {
             }
             icon.set_menu(Some(Box::new(menu.clone())));
         } else {
-            match build_icon(menu, "AI Limits") {
+            match build_icon(menu, "QuotaBar") {
                 Ok(icon) => {
                     if icon.set_visible(true).is_err() {
                         return false;
@@ -89,6 +103,7 @@ impl Tray {
         }
         self.mode = mode;
         self.last.clear();
+        self.quota_cache = None;
         crate::platform::promote_tray_icons();
         self.promote_pending = true;
         self.update(providers, theme, true);
@@ -100,14 +115,13 @@ impl Tray {
         let Some(icon) = self.icon.as_ref() else {
             return;
         };
-        // Explicit Tray and panel fallback share the weekly quota and renderer.
+        // Explicit Tray and panel fallback share the selected quotas and renderer.
         let rings = matches!(self.mode, IndicatorKind::Tray);
-        let weekly = super::weekly::WeeklyQuota::from_providers(providers);
+        let quotas = super::quota_view::selected(providers, &self.appearance);
+        let light = crate::platform::system_uses_light_theme();
+        let quota_state = (quotas.clone(), light);
         let state: Vec<Option<u8>> = if rings {
-            vec![
-                weekly.remaining.map(|p| p.round() as u8),
-                Some(u8::from(weekly.muted())),
-            ]
+            Vec::new()
         } else if matches!(self.mode, IndicatorKind::Bars) {
             // One bar row per provider.
             providers
@@ -117,15 +131,36 @@ impl Tray {
         } else {
             return;
         };
-        if force || state != self.last {
+        #[cfg(windows)]
+        let icon_size = unsafe {
+            use windows::Win32::UI::{
+                HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi},
+                WindowsAndMessaging::SM_CXSMICON,
+            };
+            GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()).clamp(16, 64) as u32
+        };
+        #[cfg(not(windows))]
+        let icon_size = ICON_SIZE;
+        if force
+            || icon_size != self.last_icon_size
+            || state != self.last
+            || (rings && self.quota_cache.as_ref() != Some(&quota_state))
+        {
+            self.last_icon_size = icon_size;
+            self.quota_cache = Some(quota_state);
             self.last = state;
             // The tray icon sits on the system taskbar, which has its own
             // light/dark theme independent of the widget — render its ink to
             // match so it stays readable on a light taskbar.
             let light = crate::platform::system_uses_light_theme();
             let img = if rings {
-                let mut pm = Pixmap::new(ICON_SIZE, ICON_SIZE).expect("tray dimensions");
-                super::weekly::paint_styled_ring(&mut pm, &weekly, light, &self.appearance);
+                let pm = super::quota_view::render_tray_icon(
+                    icon_size,
+                    &quotas,
+                    light,
+                    &self.appearance,
+                    self.warning_remaining,
+                );
                 to_icon(&pm)
             } else {
                 draw_stacked_icon(providers, theme, light)
@@ -135,9 +170,9 @@ impl Tray {
             }
         }
         let _ = icon.set_tooltip(Some(if rings {
-            weekly.tooltip()
+            super::quota_view::hover_tooltip(providers, &self.appearance)
         } else {
-            tooltip(providers)
+            tooltip(providers, &self.appearance)
         }));
         // Second promotion pass once the registry keys surely exist.
         if self.promote_pending {
@@ -208,15 +243,24 @@ pub(crate) fn ring_cache_state(providers: &[ProviderData]) -> Vec<Option<u8>> {
     vec![first, second]
 }
 
-pub(crate) fn tooltip(providers: &[ProviderData]) -> String {
+pub(crate) fn tooltip(
+    providers: &[ProviderData],
+    style: &crate::config::appearance::Appearance,
+) -> String {
     if providers.is_empty() {
-        return "AI Limits".to_string();
+        return "QuotaBar".to_string();
     }
     providers
         .iter()
-        .map(|d| match provider_pct(d) {
-            Some(p) => format!("{} {}%", d.id.display_name(), p.round() as u32),
-            None => format!("{} •", d.id.display_name()),
+        .map(|d| {
+            if d.id == crate::providers::ProviderId::Codex {
+                super::quota_view::hover_tooltip(std::slice::from_ref(d), style)
+            } else {
+                match provider_pct(d) {
+                    Some(p) => format!("{} {}%", d.id.display_name(), p.round() as u32),
+                    None => format!("{} •", d.id.display_name()),
+                }
+            }
         })
         .collect::<Vec<_>>()
         .join("  ·  ")
@@ -615,13 +659,19 @@ pub(crate) fn render_tooltip(text: &str, bar_h: f32, light: bool) -> Pixmap {
     // tooltip unreadable or enormous.
     let scale = (bar_h / TIP_BASE_BAR_H).clamp(0.85, 3.0);
     let size = TIP_FONT_PX * scale;
-    let (tw, th) = text_extent(text, size);
+    let lines: Vec<_> = text.lines().collect();
+    let tw = lines
+        .iter()
+        .map(|line| text_extent(line, size).0)
+        .fold(0.0_f32, f32::max);
     let pad_x = (TIP_PAD_X * scale).round();
     let pad_top = (TIP_PAD_TOP * scale).round();
     let pad_bottom = (TIP_PAD_BOTTOM * scale).round();
     let line_h = (TIP_LINE_H * scale).round();
     let box_w = (tw + pad_x * 2.0).ceil().max(8.0);
-    let box_h = (line_h + pad_top + pad_bottom).ceil().max(8.0);
+    let box_h = (line_h * lines.len().max(1) as f32 + pad_top + pad_bottom)
+        .ceil()
+        .max(8.0);
     // The pixmap is bigger than the box: the shadow needs room around it.
     // `TIP_SHADOW` is also the box's offset inside the pixmap, which the caller
     // subtracts when positioning — see TaskbarPanel::show_tooltip.
@@ -630,7 +680,6 @@ pub(crate) fn render_tooltip(text: &str, bar_h: f32, light: bool) -> Pixmap {
     let h = (box_h + inset * 2.0) as u32;
     // Centre the actual ink inside the fixed line band, so a string with no
     // descenders does not float high in the box.
-    let text_y = inset + pad_top + (line_h - th) / 2.0;
     let mut pm = Pixmap::new(w, h).unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
     pm.fill(tiny_skia::Color::TRANSPARENT);
     let radius = (TIP_RADIUS * scale).min(box_h / 2.0);
@@ -708,7 +757,11 @@ pub(crate) fn render_tooltip(text: &str, bar_h: f32, light: bool) -> Pixmap {
     } else {
         fill_round_rect(&mut pm, inset, inset, box_w, box_h, radius, body);
     }
-    draw_text_at(&mut pm, text, inset + pad_x, text_y, size, text_ink);
+    for (i, line) in lines.iter().enumerate() {
+        let th = text_extent(line, size).1;
+        let text_y = inset + pad_top + line_h * i as f32 + (line_h - th) / 2.0;
+        draw_text_at(&mut pm, line, inset + pad_x, text_y, size, text_ink);
+    }
     pm
 }
 
@@ -872,6 +925,7 @@ mod tests {
 
     fn data(id: ProviderId, pct: u64) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id,
             status: ProviderStatus::Ok,
             metrics: vec![Metric {

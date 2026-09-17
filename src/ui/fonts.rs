@@ -47,6 +47,7 @@ pub(crate) fn fonts() -> Option<&'static Fonts> {
         .get_or_init(|| {
             Some(Fonts {
                 latin: load(&[
+                    "SegUIVar.ttf",
                     "segoeui.ttf",
                     "arial.ttf",
                     "tahoma.ttf",

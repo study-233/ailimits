@@ -39,6 +39,7 @@ impl CodexProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id: self.id(),
             status,
             metrics,
@@ -94,7 +95,7 @@ impl CodexProvider {
         match resp.status().as_u16() {
             200 => {
                 let body = resp.text().await?;
-                let metrics = parse_wham_usage(&body)?;
+                let (metrics, plan_type) = parse_wham_snapshot(&body)?;
                 if metrics.is_empty() {
                     // Undocumented endpoint: an unknown schema is an honest error,
                     // not invented numbers.
@@ -103,7 +104,9 @@ impl CodexProvider {
                         vec![],
                     )));
                 }
-                Ok(Some(self.data(ProviderStatus::Ok, metrics)))
+                let mut data = self.data(ProviderStatus::Ok, metrics);
+                data.plan_type = plan_type;
+                Ok(Some(data))
             }
             401 | 403 => Ok(None),
             other => Ok(Some(self.data(
@@ -157,10 +160,19 @@ async fn read_codex_token() -> Result<Option<String>> {
 ///  "secondary_window": {"used_percent": 28, ...}}, "plan_type": "plus", ...}
 /// Window positions vary by account. Duration is authoritative when supplied.
 pub fn parse_wham_usage(body: &str) -> Result<Vec<Metric>> {
+    parse_wham_snapshot(body).map(|(metrics, _)| metrics)
+}
+
+pub fn parse_wham_snapshot(body: &str) -> Result<(Vec<Metric>, Option<String>)> {
     let value: serde_json::Value = serde_json::from_str(body)?;
+    let plan_type = value
+        .get("plan_type")
+        .and_then(|p| p.as_str())
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| !p.is_empty());
     let rate_limit = match value.get("rate_limit") {
         Some(rl) if rl.is_object() => rl,
-        _ => return Ok(vec![]),
+        _ => return Ok((vec![], plan_type)),
     };
 
     let mut metrics = Vec::new();
@@ -204,5 +216,5 @@ pub fn parse_wham_usage(body: &str) -> Result<Vec<Metric>> {
     push_window("primary_window", "Session", MetricWindow::Session);
     push_window("secondary_window", "Weekly", MetricWindow::Long);
 
-    Ok(metrics)
+    Ok((metrics, plan_type))
 }

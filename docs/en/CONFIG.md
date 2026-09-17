@@ -1,24 +1,78 @@
-## Fork taskbar appearance
+# QuotaBar configuration
 
-Desktop widget options are legacy and ignored in this fork. `general.panel_locked` locks both dragging and automatic positioning; old `window.locked` migrates when the new field is absent. `general.panel_position_x` is the taskbar-relative horizontal DIP coordinate. Off migrates to the panel and legacy Bars to the weekly tray ring.
+Configuration remains at `%APPDATA%\AiLimits\config.toml` for upgrade compatibility. The internal executable, credentials and installation identity retain their existing names. Restart after manually editing this file.
 
-`[appearance]` defaults:
+## Display and appearance
 
 ```toml
-ring_color = "#FF3774"
-number_color = "auto" # or #RRGGBB
+[general]
+indicator = "panel_rows" # panel_rows / tray
+language = "auto" # auto / zh-CN / en
+panel_locked = false
+# panel_position_x = 420 # DIP from the selected taskbar's left edge
+
+[appearance]
+display_style = "rings" # rings / bars
+tray_display = "auto" # auto / ring / number / ring_state
+periods = "weekly" # weekly / five_hours / both
+ring_color = "#FF3774" # weekly color (legacy key retained)
+session_color = "#30C8F0" # 5-hour color
+number_color = "auto" # auto / #RRGGBB
 ring_size = 28 # 12–44 DIP
-ring_thickness = 4 # 1–12, less than half the diameter
-ring_x = 8 # 0–300 DIP from panel left
-ring_y = 0 # −20–20 DIP from centered position
-number_size = 20 # 10–40 DIP ink height
-number_x = 43 # 0–300 DIP from panel left
-number_y = 0 # −20–20 DIP from centered position
+ring_thickness = 4 # 1–12; less than half the ring diameter
+ring_x = 6 # 0–300 DIP
+ring_y = 0 # −20–20 DIP from vertical center
+number_size = 20 # 10–40 DIP; dual rows fit at up to 14 DIP
+number_x = 41 # ring-mode text X, 0–300 DIP
+number_y = 0 # −20–20 DIP, clamped inside each row
 number_weight = "semibold" # regular / semibold / bold
-symbol_percent = 60 # 40–100, relative to digit size
+symbol_percent = 60 # 40–100
+bar_width = 88 # 32–200 DIP
+bar_thickness = 8 # 2–16 DIP
+bar_x = 112 # minimum bar X, 0–300 DIP; text reserves space before it
+bar_y = 0 # −20–20 DIP from each row's center
+bar_number_x = 8 # bar-mode text X, 0–300 DIP
+
+[network]
+proxy_mode = "system" # system / direct
 ```
 
-Right-click Appearance settings for live preview; Save persists, Cancel/close rolls back. Vertical offsets stay inside the taskbar. Outdated/missing data retains muted state styling. The tray uses the same ring hue and relative thickness within the system-controlled icon size. The following upstream widget options are retained only for configuration compatibility.
+All progress means **remaining** quota. Dual views have a fixed order: 5 hours then weekly; concentric rings use 5 hours outside and weekly inside. A missing selected window stays missing, even if another window is available. The duration returned by the provider determines the window; older responses without duration retain the existing parser compatibility behavior.
+
+The tray follows the taskbar's selected shape, periods and period colors, with geometry adapted to 16/20/24/32-pixel icons. `ring` ("Follow style") draws the selected ring or bar; `auto` and `ring_state` ("Style + state") also show a corner marker for low or unavailable/stale quota. Dual views retain both periods. Explicit `number` mode uses the most constrained known selected period and shares the taskbar's numeric color and font weight; it omits the percent sign and pads values below 10 with a zero. Warning colors use the Codex provider's existing used-quota `alert_threshold` (80 means a warning at 20% remaining); stale/estimated data stays muted. Automatic number colors progress from amber to red below that threshold; explicit custom number colors remain respected.
+
+Taskbar and tray hover tips share the same summary, line breaks, selected periods, reset countdown and update age. Explicit Codex `pro` and `prolite` plan values show only weekly quota in both tips, even when 5 hours is selected; missing weekly quota remains unavailable. This rule does not change the indicator graphics or underlying quota data. Unknown plans follow the selected periods.
+
+Settings and menus follow **AppsUseLightTheme**, while taskbar/tray ink follows **SystemUsesLightTheme**, including Windows mixed-theme configurations.
+
+Sizes and coordinates use DIP. Dual rings constrain their rendered stroke to maintain a gap; dual text rows fit their available height without rewriting saved settings. Extreme manual ring/text offsets may intentionally overlap; bar text reserves a minimum gap before the bar.
+
+Preferences preview a draft on the taskbar and tray. Save commits it; Cancel or closing restores the saved appearance. Reset affects appearance only. Compact/Standard/Large presets update ring diameter, text size, bar width and the ring/text spacing; Custom keeps individually edited values. Advanced controls show geometry for the active style. Small work areas use vertical scrolling, including keyboard focus scrolling.
+
+Each new appearance field has an independent default or normalization rule. Existing ring color, offsets, text preferences and position lock survive upgrades. Unknown enum values cannot discard sibling settings or credentials. Legacy `general.indicator = "bars"` remains a tray compatibility alias; choose `[appearance].display_style = "bars"` for the new remaining-quota bar presentation.
+
+## Language, networking and authentication
+
+Automatic language mode selects Simplified Chinese for Chinese Windows display languages and English otherwise. Menu changes apply immediately. Chinese UI uses installed Windows fonts without downloading a font package.
+
+System proxy mode follows Windows current-user static proxies and reqwest environment-proxy rules (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase forms). Windows static-proxy changes affect the next request; external changes to environment variables require restarting the app. PAC/WPAD is not supported. Direct mode ignores these proxy settings, but cannot bypass operating-system TUN/VPN routing. Failed proxy requests never silently retry direct, and HTTPS certificate verification stays enabled.
+
+Authentication uses the same configuration and proxy selection:
+
+```powershell
+.\ailimits-auth.exe status
+.\ailimits-auth.exe set copilot
+.\ailimits-auth.exe set claude
+.\ailimits-auth.exe set-usage-token codex
+.\ailimits-auth.exe remove copilot
+.\ailimits-auth.exe remove-usage-token codex
+```
+
+Secret input is hidden and stored in Windows Credential Manager. Manual usage tokens are validated before saving. Official CLI tokens are read without being refreshed or rotated by QuotaBar.
+
+## Legacy reference
+
+The following inherited reference includes old desktop-widget options, which are retained for configuration compatibility but are not active QuotaBar features. Use the taskbar settings above for current presentation.
 
 # CONFIG.md — the configuration file
 

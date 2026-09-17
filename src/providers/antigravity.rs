@@ -193,6 +193,7 @@ impl AntigravityProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id: self.id(),
             status,
             metrics,

@@ -180,6 +180,9 @@ pub const EXHAUSTED_PCT: f32 = 100.0;
 /// Provider data for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderData {
+    /// Subscription returned with this usage snapshot; unknown in older caches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_type: Option<String>,
     pub id: ProviderId,
     pub status: ProviderStatus,
     pub metrics: Vec<Metric>,
@@ -198,6 +201,17 @@ pub struct ProviderData {
 }
 
 impl ProviderData {
+    pub fn is_codex_pro(&self) -> bool {
+        self.id == ProviderId::Codex
+            && self.plan_type.as_deref().is_some_and(|p| {
+                // wham/usage returns "prolite" for the Pro account variant
+                // observed in live usage snapshots. Match explicit values only.
+                ["pro", "prolite"]
+                    .iter()
+                    .any(|plan| p.trim().eq_ignore_ascii_case(plan))
+            })
+    }
+
     /// The metric that represents this provider right now.
     ///
     /// A spent long window outranks the session gauge: once the weekly cap is
@@ -298,6 +312,7 @@ impl ProviderData {
             .collect();
 
         ProviderData {
+            plan_type: self.plan_type.clone(),
             id: self.id.clone(),
             status: if any_reset_passed {
                 ProviderStatus::Estimated

@@ -44,7 +44,7 @@ fn layout(quota: &WeeklyQuota, height: f32, style: &Appearance) -> Vec<Glyph> {
         append(
             '%',
             em * symbol_scale,
-            text.len() as f32 * cell + height * 0.20,
+            text.len() as f32 * cell + height * 0.12,
         );
     } else {
         append('—', em, cell);
@@ -94,14 +94,19 @@ fn bounds(glyphs: &[Glyph]) -> Bounds {
     }
 }
 
-fn provider_label(height: f32) -> Vec<Glyph> {
+fn provider_label(height: f32, window: crate::providers::MetricWindow) -> Vec<Glyph> {
     let Some(font) = weighted_number_font(NumberWeight::Regular) else {
         return Vec::new();
     };
     let mut size = height * 100.0 / font.metrics('C', 100.0).height.max(1) as f32;
     loop {
         let mut x = 0.0;
-        let glyphs: Vec<_> = "Codex"
+        let text = if window == crate::providers::MetricWindow::Long {
+            "Codex · 7d"
+        } else {
+            "Codex · 5h"
+        };
+        let glyphs: Vec<_> = text
             .chars()
             .map(|character| {
                 let metrics = font.metrics(character, size);
@@ -133,7 +138,7 @@ struct Block {
 }
 
 fn block(quota: &WeeklyQuota, style: &Appearance, scale: f32, available_height: f32) -> Block {
-    let label = provider_label(9.0 * scale);
+    let label = provider_label(9.0 * scale, quota.window);
     let label_bounds = bounds(&label);
     let gap = (2.0 * scale).round();
     let available_digits = (available_height - gap - label_bounds.height()).max(1.0);
@@ -172,7 +177,13 @@ pub(crate) fn width(style: &Appearance, scale: f32) -> f32 {
         })
         .fold(0.0, f32::max)
         .max(bounds(&layout(&WeeklyQuota::from_providers(&[]), h, style)).width());
-    number_width.max(bounds(&provider_label(9.0 * scale)).width()) + 2.0
+    number_width.max(
+        bounds(&provider_label(
+            9.0 * scale,
+            crate::providers::MetricWindow::Long,
+        ))
+        .width(),
+    ) + 2.0
 }
 
 pub(crate) fn draw(
@@ -202,7 +213,11 @@ pub(crate) fn draw(
         pm,
         &block.label,
         (x + block.label_x, top + block.label_baseline),
-        ink,
+        {
+            let mut secondary = ink;
+            secondary.set_alpha(0.72);
+            secondary
+        },
         NumberWeight::Regular,
     );
 }
@@ -229,7 +244,7 @@ fn draw_line(
                 continue;
             }
             let offset = ((py as u32 * pm.width() + px as u32) * 4) as usize;
-            let a = coverage as u32;
+            let a = (coverage as f32 * ink.alpha()).round() as u32;
             let pixel = &mut pm.data_mut()[offset..offset + 4];
             for (channel, component) in [ink.red(), ink.green(), ink.blue()].into_iter().enumerate()
             {
@@ -240,6 +255,101 @@ fn draw_line(
             pixel[3] = (a + pixel[3] as u32 * (255 - a) / 255).min(255) as u8;
         }
     }
+}
+
+/// Native-size tray digits, using the same selected numeric font and color.
+pub(crate) fn draw_compact(pm: &mut Pixmap, text: &str, ink: Color, weight: NumberWeight) {
+    let Some(font) = weighted_number_font(weight) else {
+        return;
+    };
+    let mut size = pm.height() as f32;
+    let glyphs = loop {
+        let mut x = 0.;
+        let glyphs: Vec<_> = text
+            .chars()
+            .map(|character| {
+                let metrics = font.metrics(character, size);
+                let glyph = Glyph {
+                    character,
+                    metrics,
+                    size,
+                    x,
+                };
+                x += metrics.advance_width;
+                glyph
+            })
+            .collect();
+        let b = bounds(&glyphs);
+        if (b.width() <= pm.width() as f32 - 2. && b.height() <= pm.height() as f32 - 2.)
+            || size <= 1.
+        {
+            break glyphs;
+        }
+        size = (size - 0.25).max(1.);
+    };
+    let b = bounds(&glyphs);
+    let origin = (
+        (pm.width() as f32 - b.width()) / 2. - b.left,
+        (pm.height() as f32 - b.height()) / 2. - b.top,
+    );
+    draw_line(pm, &glyphs, origin, ink, weight);
+}
+
+/// A compact fixed-width numeric row with a colored period label.
+pub(crate) fn draw_row(
+    pm: &mut Pixmap,
+    quota: &WeeklyQuota,
+    origin: (f32, f32),
+    scale: f32,
+    inks: (Color, Color),
+    style: &Appearance,
+) {
+    let glyphs = layout(quota, style.number_size as f32 * scale, style);
+    let b = bounds(&glyphs);
+    // Reserve the estimate marker even when it is absent; digit positions do not jump.
+    let marker = style.symbol_percent as f32 / 100.0 * style.number_size as f32 * scale;
+    draw_line(
+        pm,
+        &glyphs,
+        (origin.0 + marker, origin.1 - b.top),
+        inks.0,
+        style.number_weight,
+    );
+    let Some(font) = weighted_number_font(NumberWeight::Regular) else {
+        return;
+    };
+    let size = 9.0 * scale;
+    let label = if quota.window == crate::providers::MetricWindow::Long {
+        "7d"
+    } else {
+        "5h"
+    };
+    let mut x = 0.0;
+    let label: Vec<_> = label
+        .chars()
+        .map(|character| {
+            let metrics = font.metrics(character, size);
+            let glyph = Glyph {
+                metrics,
+                character,
+                size,
+                x,
+            };
+            x += metrics.advance_width;
+            glyph
+        })
+        .collect();
+    let lb = bounds(&label);
+    draw_line(
+        pm,
+        &label,
+        (
+            origin.0 + width(style, scale) + 4.0 * scale,
+            origin.1 + (b.height() - lb.height()) / 2.0 - lb.top,
+        ),
+        inks.1,
+        NumberWeight::Regular,
+    );
 }
 
 #[cfg(test)]
@@ -274,7 +384,7 @@ mod tests {
                                 let label = bounds(&lines.label);
                                 assert_eq!(
                                     lines.label.iter().map(|g| g.character).collect::<String>(),
-                                    "Codex"
+                                    "Codex · 7d"
                                 );
                                 assert!(label.height() > 0.0 && label.height() <= 9.0 * scale);
                                 assert!(lines.height <= available);

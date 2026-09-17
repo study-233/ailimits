@@ -1026,6 +1026,14 @@ pub fn promote_tray_icons() -> u32 {
 /// per-user `SystemUsesLightTheme` DWORD (1 = light). Defaults to dark
 /// (false) on any error, matching the Win11 out-of-box taskbar.
 pub fn system_uses_light_theme() -> bool {
+    uses_light_theme(false)
+}
+
+pub fn apps_use_light_theme() -> bool {
+    uses_light_theme(true)
+}
+
+fn uses_light_theme(apps: bool) -> bool {
     use windows::core::w;
     use windows::Win32::System::Registry::{
         RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE,
@@ -1047,7 +1055,11 @@ pub fn system_uses_light_theme() -> bool {
         let mut len: u32 = std::mem::size_of::<u32>() as u32;
         let ok = RegQueryValueExW(
             key,
-            w!("SystemUsesLightTheme"),
+            if apps {
+                w!("AppsUseLightTheme")
+            } else {
+                w!("SystemUsesLightTheme")
+            },
             None,
             None,
             Some(&mut data as *mut u32 as *mut u8),

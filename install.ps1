@@ -1,4 +1,4 @@
-# AI Limits terminal installer.
+# QuotaBar terminal installer.
 #
 #   irm https://raw.githubusercontent.com/study-233/ailimits/master/install.ps1 | iex
 #
@@ -9,7 +9,7 @@
 $ErrorActionPreference = 'Stop'
 
 $release = Invoke-RestMethod 'https://api.github.com/repos/study-233/ailimits/releases/latest'
-$asset = $release.assets | Where-Object { $_.name -like 'AiLimits-Setup-*.exe' } | Select-Object -First 1
+$asset = $release.assets | Where-Object { ($_.name -like 'QuotaBar-Setup-*.exe' -or $_.name -like 'AiLimits-Setup-*.exe') } | Select-Object -First 1
 if (-not $asset) { throw 'no installer asset found on the latest release' }
 
 $expected = $asset.digest -replace '^sha256:', ''
@@ -26,6 +26,6 @@ if ($actual -ne $expected.ToUpper()) {
 }
 Write-Host 'checksum verified'
 
-Start-Process -FilePath $path -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+Start-Process -FilePath $path -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -WindowStyle Hidden -Wait
 Remove-Item $path -Force
-Write-Host "AI Limits $($release.tag_name) installed. It starts from the Start menu; usage appears once your AI CLIs have run."
+Write-Host "QuotaBar $($release.tag_name) installed. It starts from the Start menu; usage appears once your AI CLIs have run."

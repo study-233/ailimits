@@ -13,7 +13,7 @@ use tiny_skia::{Color, Pixmap};
 
 /// Base layout metrics at 100% DPI; desired_size() scales them to the bar.
 #[cfg(test)]
-const PAD_X: f32 = 8.0;
+const PAD_X: f32 = 6.0;
 #[cfg(test)]
 const NUM_W: f32 = 100.0;
 #[cfg(test)]
@@ -70,6 +70,9 @@ fn pixmap_to_bgra(pm: &Pixmap) -> Vec<u8> {
 }
 
 pub struct TaskbarPanel {
+    warning_remaining: f32,
+    hovered: bool,
+    pressed: bool,
     locked: bool,
     appearance: Appearance,
     content_width: f32,
@@ -80,7 +83,7 @@ pub struct TaskbarPanel {
     pixmap: Pixmap,
     mode: IndicatorKind,
     /// Include validity and staleness so unchanged percentages cannot mask errors.
-    last: Option<WeeklyQuota>,
+    last: Option<(Vec<WeeklyQuota>, bool)>,
     size: (u32, u32),
     /// Current screen placement, or None while hidden (taskbar slid away).
     rect: Option<(i32, i32, u32, u32)>,
@@ -142,7 +145,7 @@ impl TaskbarPanel {
     /// only when the indicator switches to a Panel mode.
     pub fn new(event_loop: &tao::event_loop::EventLoop<crate::app::UserEvent>) -> Result<Self> {
         let mut builder = tao::window::WindowBuilder::new()
-            .with_title("AI Limits Panel")
+            .with_title("QuotaBar Panel")
             .with_decorations(false)
             .with_resizable(false)
             .with_visible(false)
@@ -159,6 +162,9 @@ impl TaskbarPanel {
         );
         let pixmap = Pixmap::new(INIT_W, INIT_H).context("panel pixmap")?;
         Ok(Self {
+            warning_remaining: 20.0,
+            hovered: false,
+            pressed: false,
             locked: false,
             appearance: Appearance::default(),
             content_width: appearance_width(&Appearance::default()),
@@ -213,6 +219,11 @@ impl TaskbarPanel {
 
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
+    }
+
+    pub fn set_warning_threshold(&mut self, used: u8) {
+        self.warning_remaining = 100.0 - used.min(100) as f32;
+        self.last = None;
     }
 
     pub fn set_appearance(&mut self, mut appearance: Appearance) {
@@ -331,6 +342,16 @@ impl TaskbarPanel {
         }
     }
 
+    pub fn set_interaction(&mut self, hovered: bool, pressed: bool, providers: &[ProviderData]) {
+        if self.hovered != hovered || self.pressed != pressed {
+            self.hovered = hovered;
+            self.pressed = pressed;
+            if !self.suppressed {
+                self.redraw(providers);
+            }
+        }
+    }
+
     pub fn window_id(&self) -> WindowId {
         self.window.id()
     }
@@ -373,7 +394,10 @@ impl TaskbarPanel {
             return;
         }
         self.reposition();
-        let state = WeeklyQuota::from_providers(providers);
+        let state = (
+            super::quota_view::selected(providers, &self.appearance),
+            crate::platform::system_uses_light_theme(),
+        );
         if force || self.last.as_ref() != Some(&state) {
             self.last = Some(state);
             self.redraw(providers);
@@ -398,7 +422,7 @@ impl TaskbarPanel {
             let Some((px, py, pw, _ph)) = self.rect else {
                 return;
             };
-            let text = WeeklyQuota::from_providers(providers).tooltip();
+            let text = super::quota_view::hover_tooltip(providers, &self.appearance);
             let light = crate::platform::system_uses_light_theme();
             let pm = crate::ui::tray::render_tooltip(&text, self.size.1 as f32, light);
             let (w, h) = (pm.width() as i32, pm.height() as i32);
@@ -679,16 +703,46 @@ impl TaskbarPanel {
         let Some((x, y, w, h)) = self.rect else {
             return;
         };
-        self.pixmap = render_styled_panel(
+        self.pixmap = super::quota_view::render_with_threshold(
             w,
             h,
-            &WeeklyQuota::from_providers(providers),
+            &super::quota_view::selected(providers, &self.appearance),
             crate::platform::system_uses_light_theme(),
             &self.appearance,
+            self.warning_remaining,
         );
 
-        // Premultiplied RGBA (tiny-skia) → premultiplied BGRA (top-down) for
-        // UpdateLayeredWindow.
+        if self.hovered || self.pressed {
+            let mut surface = Pixmap::new(w, h).expect("panel hover");
+            surface.fill(color(0, 0, 0, HIT_ALPHA));
+            let light = crate::platform::system_uses_light_theme();
+            let alpha = if self.pressed { 20 } else { 12 };
+            let ink = if light {
+                color(0, 0, 0, alpha)
+            } else {
+                color(255, 255, 255, alpha)
+            };
+            let scale = h as f32 / 48.;
+            super::tray::fill_round_rect(
+                &mut surface,
+                0.,
+                2. * scale,
+                w as f32,
+                h as f32 - 4. * scale,
+                super::theme::UiMetrics::CONTROL_RADIUS * scale,
+                ink,
+            );
+            surface.draw_pixmap(
+                0,
+                0,
+                self.pixmap.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
+                tiny_skia::Transform::identity(),
+                None,
+            );
+            self.pixmap = surface;
+        }
+        // Premultiplied RGBA → BGRA for UpdateLayeredWindow.
         let data = self.pixmap.data();
         let mut bgra = vec![0u8; data.len()];
         for (s, d) in data.chunks_exact(4).zip(bgra.chunks_exact_mut(4)) {
@@ -726,9 +780,13 @@ fn render_panel(w: u32, h: u32, quota: &WeeklyQuota, light: bool) -> Pixmap {
 }
 
 pub(crate) fn appearance_width(style: &Appearance) -> f32 {
+    super::quota_view::width(style)
+}
+
+pub(crate) fn single_ring_width(style: &Appearance) -> f32 {
     (style.ring_x as f32 + style.ring_size as f32)
         .max(style.number_x as f32 + crate::ui::numbers::width(style, 1.0))
-        + 8.0
+        + 6.0
 }
 
 pub(crate) fn render_styled_panel(

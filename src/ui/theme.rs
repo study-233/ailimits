@@ -4,6 +4,76 @@
 
 use crate::config::schema::{DetailLevel, Palette, UIConfig};
 
+/// Fluent surface tokens shared by native controls, menus and previews.
+/// Values are sRGB; geometry throughout the UI is in DIPs.
+#[derive(Clone, Copy)]
+pub struct SurfaceTheme {
+    pub background: Color,
+    pub secondary: Color,
+    pub surface: Color,
+    pub hover: Color,
+    pub pressed: Color,
+    pub border: Color,
+    pub text: Color,
+    pub text_secondary: Color,
+    pub text_tertiary: Color,
+    pub accent: Color,
+    pub on_accent: Color,
+    pub warning: Color,
+    pub danger: Color,
+}
+
+impl SurfaceTheme {
+    pub fn new(light: bool) -> Self {
+        let rgb = |r, g, b| Color::rgba(r, g, b, 255);
+        if light {
+            Self {
+                background: rgb(243, 243, 243),
+                secondary: rgb(234, 234, 234),
+                surface: rgb(255, 255, 255),
+                hover: rgb(246, 246, 246),
+                pressed: rgb(229, 229, 229),
+                border: rgb(215, 215, 215),
+                text: rgb(32, 32, 32),
+                text_secondary: rgb(96, 96, 96),
+                text_tertiary: rgb(112, 112, 112),
+                accent: rgb(0, 95, 184),
+                on_accent: rgb(255, 255, 255),
+                warning: rgb(143, 88, 0),
+                danger: rgb(196, 43, 28),
+            }
+        } else {
+            Self {
+                background: rgb(32, 32, 32),
+                secondary: rgb(27, 27, 27),
+                surface: rgb(45, 45, 45),
+                hover: rgb(54, 54, 54),
+                pressed: rgb(39, 39, 39),
+                border: rgb(64, 64, 64),
+                text: rgb(242, 242, 242),
+                text_secondary: rgb(190, 190, 190),
+                text_tertiary: rgb(155, 155, 155),
+                accent: rgb(96, 205, 255),
+                on_accent: rgb(0, 42, 64),
+                warning: rgb(252, 196, 94),
+                danger: rgb(255, 153, 164),
+            }
+        }
+    }
+}
+
+pub struct UiMetrics;
+impl UiMetrics {
+    pub const BODY: f32 = 13.0;
+    pub const CAPTION: f32 = 12.0;
+    pub const TITLE: f32 = 22.0;
+    pub const CONTROL_RADIUS: f32 = 6.0;
+    pub const SURFACE_RADIUS: f32 = 8.0;
+    pub const WINDOW_RADIUS: f32 = 12.0;
+    pub const CONTROL_HEIGHT: f32 = 32.0;
+    pub const SPACING: [f32; 6] = [4.0, 8.0, 12.0, 16.0, 24.0, 32.0];
+}
+
 /// RGBA color.
 #[derive(Debug, Clone, Copy)]
 pub struct Color {

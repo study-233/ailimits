@@ -243,6 +243,7 @@ impl ClaudeProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id: self.id(),
             status,
             metrics,
@@ -255,6 +256,7 @@ impl ClaudeProvider {
     /// Finalize statusline data: keep the snapshot time so the UI can show its age.
     fn finish_statusline(&self, parsed: StatuslineSnapshot) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id: self.id(),
             status: ProviderStatus::Ok,
             metrics: parsed.metrics,
@@ -498,6 +500,7 @@ impl Provider for ClaudeProvider {
     async fn fetch(&self) -> Result<ProviderData> {
         if !self.config.enabled {
             return Ok(ProviderData {
+                plan_type: None,
                 id: self.id(),
                 status: ProviderStatus::NotConfigured,
                 metrics: vec![],
@@ -510,6 +513,7 @@ impl Provider for ClaudeProvider {
             AuthMethod::ApiKey => match self.get_api_key() {
                 Some(key) => self.fetch_via_api_key(&key).await,
                 None => Ok(ProviderData {
+                    plan_type: None,
                     id: self.id(),
                     status: ProviderStatus::AuthError(
                         "API key not found in Credential Manager".to_string(),

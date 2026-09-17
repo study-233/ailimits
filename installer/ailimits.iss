@@ -3,8 +3,8 @@
 ; Build: ISCC.exe installer\ailimits.iss
 ; Binaries are taken from target\release-min (cargo build --profile release-min).
 
-#define AppName "AI Limits (study-233 fork)"
-#define AppVersion "0.1.0"
+#define AppName "QuotaBar"
+#define AppVersion "0.2.0"
 #define AppExe "ailimits.exe"
 
 [Setup]
@@ -16,12 +16,15 @@ AppPublisherURL=https://github.com/study-233/ailimits
 LicenseFile=..\LICENSE
 DefaultDirName={localappdata}\AiLimits
 DefaultGroupName={#AppName}
+; Rename the Start menu group during an upgrade instead of reusing the old fork label.
+UsePreviousGroup=no
 ; Per-user install, no admin rights.
 PrivilegesRequired=lowest
 OutputDir=..\target\installer
-OutputBaseFilename=AiLimits-Setup-{#AppVersion}
+OutputBaseFilename=QuotaBar-Setup-{#AppVersion}
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayName={#AppName}
 Compression=lzma2/max
 SolidCompression=yes
 ; Close the running widget before updating.
@@ -52,7 +55,21 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\TRADEMARKS.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\en\*.md"; DestDir: "{app}\docs\en"; Flags: ignoreversion
+Source: "..\docs\zh-CN\*.md"; DestDir: "{app}\docs\zh-CN"; Flags: ignoreversion
+Source: "..\docs\images\quotabar-*.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
+Source: "..\docs\images\fluent-*.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
 Source: "languages\ChineseSimplified.LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+
+[InstallDelete]
+; Remove only shortcuts created by older versions. Preserve configuration and credentials.
+Type: files; Name: "{userprograms}\AI Limits (study-233 fork)\AI Limits (study-233 fork).lnk"
+Type: dirifempty; Name: "{userprograms}\AI Limits (study-233 fork)"
+Type: files; Name: "{userprograms}\AI Limits\AI Limits.lnk"
+Type: dirifempty; Name: "{userprograms}\AI Limits"
+Type: files; Name: "{autodesktop}\AI Limits (study-233 fork).lnk"
+Type: files; Name: "{autodesktop}\AI Limits.lnk"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

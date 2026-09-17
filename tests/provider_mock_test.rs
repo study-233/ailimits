@@ -208,6 +208,7 @@ fn hover_reason_explains_stale_rows_only() {
     use std::collections::HashMap;
 
     let stale = |id: ProviderId| ProviderData {
+        plan_type: None,
         id,
         status: ProviderStatus::Ok,
         metrics: vec![Metric {
@@ -304,6 +305,7 @@ fn stale_data_with_passed_reset_extrapolates_to_zero() {
     // Data from 10 minutes ago; the session reset 5 minutes ago,
     // the weekly reset is in the future.
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -348,6 +350,7 @@ fn fresh_data_is_not_extrapolated() {
     // Fresh data (30s old) is left intact even with a reset in the past:
     // the next fetch will refine it.
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![Metric {
@@ -370,6 +373,7 @@ fn fresh_data_is_not_extrapolated() {
 #[test]
 fn primary_percentage_uses_first_metric() {
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![metric(50, Some(100)), metric(10, Some(100))],
@@ -396,6 +400,7 @@ fn an_exhausted_long_window_becomes_the_headline_for_every_surface() {
     // Claude shape: the weekly cap is spent, so no new session can start —
     // the tray, the taskbar panel and the toast must all read 100%, not 20%.
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -415,6 +420,7 @@ fn an_exhausted_long_window_becomes_the_headline_for_every_surface() {
 #[test]
 fn an_exhausted_opus_pool_counts_even_though_its_label_never_says_week() {
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -434,6 +440,7 @@ fn an_exhausted_opus_pool_counts_even_though_its_label_never_says_week() {
 #[test]
 fn a_long_window_with_headroom_leaves_the_session_in_charge() {
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Codex,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -460,6 +467,7 @@ fn headline_reset_quotes_the_spent_long_windows_reset_not_the_soonest() {
     // not.
     let now = Utc::now();
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -500,6 +508,7 @@ fn headline_reset_falls_back_to_the_nearest_reset_when_no_spent_long_window() {
     // reset), same as before this fix.
     let now = Utc::now();
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Codex,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -535,6 +544,7 @@ fn live_data_survives_a_wall_clock_jump() {
     // It must NOT grey and must NOT fabricate an estimate — the staleness gate
     // is monotonic for live data.
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![Metric {
@@ -561,6 +571,7 @@ fn data_without_monotonic_anchor_uses_wall_age() {
     // A statusline snapshot / disk-cache entry (received_at None) is staled by
     // its own wall-clock age: a fresh snapshot is live, an old one is stale.
     let mk = |age_secs: i64| ProviderData {
+        plan_type: None,
         id: ProviderId::Codex,
         status: ProviderStatus::Ok,
         metrics: vec![metric(10, Some(100))],
@@ -578,6 +589,7 @@ fn marginally_past_reset_within_grace_is_not_extrapolated() {
     // could be a wall-clock skew rather than a real rollover. It must NOT become
     // an ≈0% estimate; the value is preserved (the renderer greys it instead).
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![Metric {
@@ -608,6 +620,7 @@ fn next_reset_skips_past_timestamps() {
 
     let future = Utc::now() + Duration::hours(3);
     let data = ProviderData {
+        plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
         metrics: vec![
@@ -779,4 +792,44 @@ fn antigravity_models_quota_treats_a_missing_fraction_as_exhausted() {
     let metrics = parse_available_models_quota(body).expect("should parse");
     assert_eq!(metrics.len(), 1, "one shared pool, deduped");
     assert_eq!(metrics[0].used, 100);
+}
+
+#[test]
+fn codex_plan_is_parsed_without_changing_metrics() {
+    use ailimits::providers::codex::{parse_wham_snapshot, parse_wham_usage};
+    for plan in ["pro", "prolite", "plus", "team", "unknown"] {
+        let body = format!(
+            r#"{{"plan_type":"{plan}","rate_limit":{{"primary_window":{{"used_percent":12,"limit_window_seconds":18000}},"secondary_window":{{"used_percent":34,"limit_window_seconds":604800}}}}}}"#
+        );
+        let (metrics, parsed) = parse_wham_snapshot(&body).unwrap();
+        assert_eq!(parsed.as_deref(), Some(plan));
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(metrics[0].used, 12);
+        assert_eq!(metrics[1].used, 34);
+        assert_eq!(parse_wham_usage(&body).unwrap().len(), 2);
+    }
+    for body in [r#"{}"#, r#"{"plan_type":null}"#, r#"{"plan_type":42}"#] {
+        assert_eq!(parse_wham_snapshot(body).unwrap().1, None);
+    }
+}
+
+#[test]
+fn subscription_metadata_is_optional_and_survives_cache_roundtrip() {
+    let legacy = r#"{"id":"Codex","status":"Ok","metrics":[],"updated_at":"2026-09-17T00:00:00Z"}"#;
+    // Use the enum's actual serialization so this tests only metadata compatibility.
+    let mut json: serde_json::Value = serde_json::from_str(legacy).unwrap();
+    json["id"] = serde_json::to_value(ProviderId::Codex).unwrap();
+    let mut data: ProviderData = serde_json::from_value(json).unwrap();
+    assert!(!data.is_codex_pro());
+    data.plan_type = Some("Pro".into());
+    let decoded: ProviderData =
+        serde_json::from_str(&serde_json::to_string(&data).unwrap()).unwrap();
+    assert!(decoded.is_codex_pro());
+    data.updated_at = Utc::now() - chrono::Duration::hours(1);
+    assert!(data.aged_for_display().is_codex_pro());
+    data.id = ProviderId::Antigravity;
+    assert!(
+        !data.is_codex_pro(),
+        "Pro model names from other providers must not match"
+    );
 }

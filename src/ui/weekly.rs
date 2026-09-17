@@ -1,11 +1,15 @@
 //! Display-only Codex weekly remaining quota. Never changes provider metrics.
+#[cfg(test)]
 use crate::i18n::t;
 use crate::providers::{MetricWindow, ProviderData, ProviderId, ProviderStatus};
-use chrono::{DateTime, Local, Utc};
+#[cfg(test)]
+use chrono::Local;
+use chrono::{DateTime, Utc};
 use tiny_skia::{LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WeeklyQuota {
+    pub window: MetricWindow,
     pub remaining: Option<f32>,
     pub stale: bool,
     pub estimated: bool,
@@ -15,8 +19,12 @@ pub(crate) struct WeeklyQuota {
 
 impl WeeklyQuota {
     pub fn from_providers(providers: &[ProviderData]) -> Self {
+        Self::for_window(providers, MetricWindow::Long)
+    }
+
+    pub fn for_window(providers: &[ProviderData], window: MetricWindow) -> Self {
         let data = providers.iter().find(|d| d.id == ProviderId::Codex);
-        let metric = data.and_then(|d| d.metrics.iter().find(|m| m.window == MetricWindow::Long));
+        let metric = data.and_then(|d| d.metrics.iter().find(|m| m.window == window));
         let usable = data
             .is_some_and(|d| matches!(d.status, ProviderStatus::Ok | ProviderStatus::Estimated));
         // Unknown/zero limits must not manufacture a full remaining quota.
@@ -32,12 +40,13 @@ impl WeeklyQuota {
             Some(ProviderStatus::AuthError(_)) => "Authentication required",
             Some(ProviderStatus::NetworkError(_)) => "Network unavailable",
             None | Some(ProviderStatus::NotConfigured) => "Codex not enabled or configured",
-            _ if remaining.is_none() => "Weekly quota unavailable",
+            _ if remaining.is_none() => "Quota unavailable",
             _ if estimated => "Estimated quota",
             _ if stale => "Cached quota (outdated)",
             _ => "Live quota",
         };
         Self {
+            window,
             remaining,
             stale,
             estimated,
@@ -57,20 +66,25 @@ impl WeeklyQuota {
         }
     }
 
+    #[cfg(test)]
     pub fn tooltip(&self) -> String {
         let reset = self
             .reset_at
             .map(|time| {
                 format!(
                     "{} {}",
-                    t("Weekly reset:"),
+                    t("Reset:"),
                     time.with_timezone(&Local).format("%m-%d %H:%M")
                 )
             })
-            .unwrap_or_else(|| t("Weekly reset time unavailable").to_string());
+            .unwrap_or_else(|| t("Reset time unavailable").to_string());
         format!(
             "{} {} · {} · {}",
-            t("Codex weekly remaining"),
+            t(if self.window == MetricWindow::Long {
+                "Codex weekly remaining"
+            } else {
+                "Codex 5-hour remaining"
+            }),
             self.label(),
             t(self.status),
             reset
@@ -171,6 +185,7 @@ pub(crate) mod tests {
 
     pub(crate) fn data(used: u64) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id: ProviderId::Codex,
             status: ProviderStatus::Ok,
             metrics: vec![

@@ -63,6 +63,8 @@ fn indicator_matches(config_kind: IndicatorKind, item_kind: IndicatorKind) -> bo
 
 /// The full context menu: view, behavior, appearance, providers, actions.
 pub struct ContextMenu {
+    #[cfg(windows)]
+    _style: super::native_menu::MenuStyle,
     pub menu: Menu,
     language_items: Vec<(CheckMenuItem, Language)>,
     proxy_items: Vec<(CheckMenuItem, ProxyMode)>,
@@ -276,8 +278,8 @@ impl ContextMenu {
         menu.append(&lock_item)?;
         menu.append(&indicator_submenu)?;
         menu.append(&reset_position_item)?;
-        menu.append(&auto_update_item)?;
         menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&auto_update_item)?;
         menu.append(&interval_submenu)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&providers_submenu)?;
@@ -287,12 +289,19 @@ impl ContextMenu {
         menu.append(&quit_item)?;
         // Version — a disabled info line.
         menu.append(&MenuItem::new(
-            format!("AI Limits v{}", env!("CARGO_PKG_VERSION")),
+            format!("QuotaBar v{}", env!("CARGO_PKG_VERSION")),
             false,
             None,
         ))?;
 
+        #[cfg(windows)]
+        let style = {
+            use muda::ContextMenu as _;
+            super::native_menu::MenuStyle::new(menu.hpopupmenu())
+        };
         Ok(Self {
+            #[cfg(windows)]
+            _style: style,
             menu,
             language_items,
             proxy_items,

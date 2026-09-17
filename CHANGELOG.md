@@ -2,6 +2,22 @@
 
 Notable, user-visible changes. Dates are release dates.
 
+## 0.2.0 — QuotaBar
+
+- 原生 Fluent 设置与菜单统一明暗主题；修复初始绘制、子菜单和滚动重绘问题。
+- 托盘与任务栏共享图形、周期、颜色和悬停摘要，提供紧凑数字及状态标记。
+- Codex `pro`／`prolite` 账号的悬停提示聚焦周额度，保留原始数据与图形选择。
+- Unified Fluent settings and menus, repaired painting/scrolling, and synchronized tray/panel appearance and hover summaries.
+
+- 更名为 QuotaBar，采用原创双色圆环图标；沿用安装标识、配置和凭据，支持覆盖升级。
+- 任务栏与托盘支持圆环／横条，以及每周／5 小时／双周期剩余额度；双圆环外圈为 5 小时，内圈为每周。
+- 重做原生外观设置：样式选择、配色、尺寸预设、深浅预览和折叠高级设置；保存生效，取消恢复。
+- 保留任务栏自动隐藏、全屏隐藏、拖动锁定与 DPI 缩放，不新增网络轮询或 UI 框架。
+- Renamed to QuotaBar with an original two-ring icon and compatible in-place upgrades.
+- Added ring/bar presentation and weekly/5-hour/both-period selection, shared by panel, tray and preview.
+- Redesigned native appearance settings with size presets, separate theme previews and collapsible advanced controls.
+- Installer and portable assets now use the QuotaBar prefix; installed 0.1.0 copies can update through the same repository.
+
 ## 0.1.0 - 2026-09-17
 
 First official release of the **study-233 fork**, based on upstream 0.6.4. Earlier entries below describe upstream releases.

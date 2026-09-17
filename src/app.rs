@@ -100,6 +100,7 @@ fn eval_panel_visibility(
 /// Loading placeholder before the first fetch.
 fn loading_data(id: ProviderId) -> ProviderData {
     ProviderData {
+        plan_type: None,
         id,
         status: ProviderStatus::Loading,
         metrics: vec![],
@@ -479,7 +480,7 @@ pub fn run() -> Result<()> {
     let theme = ComputedTheme::compute(&config.ui);
     // Hidden event/menu owner only; there is no desktop widget or render surface.
     let mut builder = WindowBuilder::new()
-        .with_title("AI Limits")
+        .with_title("QuotaBar")
         .with_visible(false);
     #[cfg(windows)]
     {
@@ -507,6 +508,14 @@ pub fn run() -> Result<()> {
     // 9b. The tray icon: a left-click toggles the overlay; a right-click shows
     // the SAME context menu. Tray menu clicks reuse the MenuEvent handler above.
     let mut tray = Tray::new();
+    tray.set_warning_threshold(
+        config
+            .providers
+            .iter()
+            .find(|p| p.id == "codex")
+            .map(|p| p.alert_threshold)
+            .unwrap_or(80),
+    );
     tray.set_appearance(config.appearance.clone());
     {
         let proxy = proxy.clone();
@@ -539,6 +548,14 @@ pub fn run() -> Result<()> {
     panel.set_offset(config.general.panel_offset_x, config.general.panel_offset_y);
     panel.set_position(config.general.panel_position_x);
     panel.set_locked(config.general.panel_locked);
+    panel.set_warning_threshold(
+        config
+            .providers
+            .iter()
+            .find(|p| p.id == "codex")
+            .map(|p| p.alert_threshold)
+            .unwrap_or(80),
+    );
     panel.set_appearance(config.appearance.clone());
     panel.set_display(config.general.panel_display);
     #[cfg(target_os = "windows")]
@@ -582,7 +599,7 @@ pub fn run() -> Result<()> {
     };
     let mut saver_at_exit = Some(saver);
 
-    info!("AI Limits ready");
+    info!("QuotaBar ready");
 
     // 11. The event loop — never returns.
     event_loop.run(move |event, _target, control_flow| {
@@ -665,6 +682,7 @@ pub fn run() -> Result<()> {
                         button: MouseButton::Left,
                         ..
                     } => {
+                        panel.set_interaction(true, true, &visible_data(&config, &display));
                         panel.begin_drag();
                         #[cfg(windows)]
                         {
@@ -676,6 +694,7 @@ pub fn run() -> Result<()> {
                         button: MouseButton::Left,
                         ..
                     } => {
+                        panel.set_interaction(true, false, &visible_data(&config, &display));
                         if let Some(x) = panel.finish_drag() {
                             config.general.panel_position_x = Some(x);
                             save_config(config.clone());
@@ -707,12 +726,18 @@ pub fn run() -> Result<()> {
                     // enter/hover (show only if the cursor lingers, like a
                     // tray-icon tooltip), hide and cancel on leave.
                     WindowEvent::CursorEntered { .. } | WindowEvent::CursorMoved { .. } => {
+                        panel.set_interaction(true, false, &visible_data(&config, &display));
                         #[cfg(target_os = "windows")]
                         if !panel.is_dragging() && !panel.tooltip_shown() && tooltip_at.is_none() {
                             tooltip_at = Some(std::time::Instant::now() + hover_delay);
                         }
                     }
+                    WindowEvent::ThemeChanged(_) => {
+                        panel.update(&visible_data(&config, &display), true);
+                        tray.update(&visible_data(&config, &display), &theme, true);
+                    }
                     WindowEvent::CursorLeft { .. } => {
+                        panel.set_interaction(false, false, &visible_data(&config, &display));
                         panel.hide_tooltip();
                         #[cfg(target_os = "windows")]
                         {
@@ -1101,20 +1126,17 @@ pub fn run() -> Result<()> {
                                     save_config(config.clone());
                                     fetch_one(&providers, &cmd_tx, &runtime, &pid);
                                     feedback(
-                                        "AI Limits",
+                                        "QuotaBar",
                                         &crate::tr!("Key for {provider} stored", provider = pid),
                                     );
                                 }
                                 Err(e) => {
                                     warn!("keyring store failed: {e}");
-                                    feedback(
-                                        "AI Limits",
-                                        crate::i18n::t("Failed to store the key"),
-                                    );
+                                    feedback("QuotaBar", crate::i18n::t("Failed to store the key"));
                                 }
                             }
                         }
-                        Err(e) => feedback("AI Limits", &format!("{e}")),
+                        Err(e) => feedback("QuotaBar", &format!("{e}")),
                     },
                     Some(MenuAction::RemoveKey(pid)) => {
                         let label = key_label_for(&pid).unwrap_or_default();
@@ -1141,13 +1163,13 @@ pub fn run() -> Result<()> {
                                 save_config(config.clone());
                                 fetch_one(&providers, &cmd_tx, &runtime, &pid);
                                 feedback(
-                                    "AI Limits",
+                                    "QuotaBar",
                                     &crate::tr!("Key for {provider} removed", provider = pid),
                                 );
                             }
                             Err(e) => {
                                 warn!("keyring delete failed: {e}");
-                                feedback("AI Limits", crate::i18n::t("Failed to remove the key"));
+                                feedback("QuotaBar", crate::i18n::t("Failed to remove the key"));
                             }
                         }
                     }
@@ -1162,7 +1184,7 @@ pub fn run() -> Result<()> {
                                     // extra source the provider tries first.
                                     fetch_one(&providers, &cmd_tx, &runtime, &pid);
                                     feedback(
-                                        "AI Limits",
+                                        "QuotaBar",
                                         &crate::tr!(
                                             "Usage token for {provider} stored",
                                             provider = pid
@@ -1172,13 +1194,13 @@ pub fn run() -> Result<()> {
                                 Err(e) => {
                                     warn!("keyring store failed: {e}");
                                     feedback(
-                                        "AI Limits",
+                                        "QuotaBar",
                                         crate::i18n::t("Failed to store the usage token"),
                                     );
                                 }
                             }
                         }
-                        Err(e) => feedback("AI Limits", &format!("{e}")),
+                        Err(e) => feedback("QuotaBar", &format!("{e}")),
                     },
                     Some(MenuAction::RemoveUsageToken(pid)) => {
                         let label = usage_token_label_for(&pid).unwrap_or_default();
@@ -1188,7 +1210,7 @@ pub fn run() -> Result<()> {
                             Ok(()) | Err(keyring::Error::NoEntry) => {
                                 fetch_one(&providers, &cmd_tx, &runtime, &pid);
                                 feedback(
-                                    "AI Limits",
+                                    "QuotaBar",
                                     &crate::tr!(
                                         "Usage token for {provider} removed",
                                         provider = pid
@@ -1198,7 +1220,7 @@ pub fn run() -> Result<()> {
                             Err(e) => {
                                 warn!("keyring delete failed: {e}");
                                 feedback(
-                                    "AI Limits",
+                                    "QuotaBar",
                                     crate::i18n::t("Failed to remove the usage token"),
                                 );
                             }
@@ -1254,6 +1276,22 @@ mod tests {
     use crate::providers::MetricUnit;
 
     #[test]
+    fn fresh_subscription_metadata_replaces_cached_plan() {
+        let mut cached = data(vec![]);
+        cached.plan_type = Some("pro".into());
+        for plan in [Some("plus"), Some("pro"), None] {
+            let mut live = data(vec![]);
+            live.plan_type = plan.map(str::to_owned);
+            assert_eq!(
+                merge_cached_metrics(live, Some(&cached))
+                    .plan_type
+                    .as_deref(),
+                plan
+            );
+        }
+    }
+
+    #[test]
     fn old_codex_cache_is_discarded_but_other_providers_and_new_cache_survive() {
         let mut metric = pct("Session", 27, MetricWindow::Session);
         metric.reset_at = Some(Utc::now() + Duration::days(3));
@@ -1298,6 +1336,7 @@ mod tests {
 
     fn data(metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            plan_type: None,
             id: ProviderId::Claude,
             status: ProviderStatus::Ok,
             metrics,

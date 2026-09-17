@@ -76,7 +76,7 @@ jobs:
         run: |
           $v = $env:RELEASE_TAG -replace '^v', ''
           $destination = Join-Path $env:RUNNER_TEMP 'AiLimits-install-check'
-          $setup = (Resolve-Path "target/installer/AiLimits-Setup-$v.exe").Path
+          $setup = (Resolve-Path "target/installer/QuotaBar-Setup-$v.exe").Path
           $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/TASKS=""', "/DIR=`"$destination`"") -WindowStyle Hidden -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           foreach ($name in @('ailimits.exe', 'ailimits-auth.exe', 'README.md', 'README.zh-CN.md', 'LICENSE', 'TRADEMARKS.md')) {
@@ -103,15 +103,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = $env:RELEASE_TAG -replace '^v', ''
-          $assets = @("target/installer/AiLimits-Setup-$v.exe", "target/installer/AiLimits-Portable-$v.zip", 'target/installer/SHA256SUMS.txt')
+          $assets = @("target/installer/QuotaBar-Setup-$v.exe", "target/installer/QuotaBar-Portable-$v.zip", 'target/installer/SHA256SUMS.txt')
           $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Refusing to replace a published release' }
-            gh release edit $env:RELEASE_TAG --title "AI Limits (study-233 fork) $env:RELEASE_TAG" --notes-file target/release-notes.md
+            gh release edit $env:RELEASE_TAG --title "QuotaBar $env:RELEASE_TAG" --notes-file target/release-notes.md
             if ($LASTEXITCODE -ne 0) { throw 'Could not update draft notes' }
             gh release upload $env:RELEASE_TAG @assets --clobber
           } else {
-            gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "AI Limits (study-233 fork) $env:RELEASE_TAG" --notes-file target/release-notes.md
+            gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "QuotaBar $env:RELEASE_TAG" --notes-file target/release-notes.md
           }
           if ($LASTEXITCODE -ne 0) { throw 'Could not upload draft assets' }
 
@@ -124,7 +124,7 @@ jobs:
           New-Item -ItemType Directory -Force $destination | Out-Null
           gh release download $env:RELEASE_TAG --dir $destination --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Could not download draft assets' }
-          $expectedNames = @("AiLimits-Setup-$v.exe", "AiLimits-Portable-$v.zip", 'SHA256SUMS.txt')
+          $expectedNames = @("QuotaBar-Setup-$v.exe", "QuotaBar-Portable-$v.zip", 'SHA256SUMS.txt')
           $actualNames = @(Get-ChildItem $destination -File | ForEach-Object Name)
           if (Compare-Object $expectedNames $actualNames) { throw 'Unexpected or missing release assets' }
           foreach ($name in $expectedNames) {

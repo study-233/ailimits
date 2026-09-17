@@ -64,7 +64,7 @@ fn print_usage() {
 
 fn help_text() -> String {
     [
-        "ailimits-auth — provider authorization for the AI Limits widget",
+        "ailimits-auth — provider authorization for the QuotaBar widget",
         "",
         "Usage:",
         "  ailimits-auth status                    show auth status",

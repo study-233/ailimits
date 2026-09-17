@@ -165,7 +165,7 @@ async fn download_and_verify(client: &reqwest::Client, update: &Update) -> Resul
 
     verify_digest(&bytes, &update.sha256)?;
 
-    let dest = std::env::temp_dir().join(format!("AiLimits-Setup-{}.exe", update.version));
+    let dest = std::env::temp_dir().join(format!("QuotaBar-Setup-{}.exe", update.version));
     tokio::fs::write(&dest, &bytes)
         .await
         .with_context(|| format!("write installer to {}", dest.display()))?;
@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(REPO, "study-233/ailimits");
         let mut release = serde_json::json!({
             "tag_name": "v999.0.0",
-            "assets": [{"name": "AiLimits-Setup.exe", "browser_download_url": "https://example.invalid/setup.exe", "digest": format!("sha256:{}", "ab".repeat(32))}]
+            "assets": [{"name": "QuotaBar-Setup-999.0.0.exe", "browser_download_url": "https://example.invalid/setup.exe", "digest": format!("sha256:{}", "ab".repeat(32))}]
         });
         let update = parse_release(&release).unwrap().unwrap();
         assert_eq!(update.version, "999.0.0");

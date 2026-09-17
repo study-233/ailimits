@@ -1,119 +1,92 @@
-# AI Limits 中文版
+# QuotaBar
 
-Windows 11 原生 Codex 每周余量任务栏工具，支持 Claude、OpenAI Codex、GitHub Copilot 和 Google Antigravity。
+**把 Codex 余量放在任务栏上。** 轻量级 Windows 11 原生工具，用彩色圆环或横条查看每周与 5 小时剩余额度。
 
-本仓库是 [napxlexn/ailimits](https://github.com/napxlexn/ailimits) 的 fork，新增 Codex 每周余量圆环、简体中文／英文切换与系统代理适配。保留原项目 GPL-3.0-or-later 许可及作者署名。
+[English](README.md) · [下载](https://github.com/study-233/ailimits/releases/latest) · [配置说明](docs/en/CONFIG.md) · [更新记录](CHANGELOG.md)
 
-[English](README.md) · [上游乌克兰语说明](README.uk.md)
+![QuotaBar 圆环与横条的深浅主题预览](docs/images/fluent-quota-styles.png)
+
+*由实际绘制代码生成的示例：左侧浅色、右侧深色；依次为每周、5 小时和双周期的圆环／横条。数值为演示数据。*
+
+## 简洁，也可自定义
+
+- **圆环 / 横条**：一键切换；双圆环外圈为 5 小时，内圈为每周。
+- **每周 / 5 小时 / 同时显示**：按需要选择。`5h` 表示 5 小时，`7d` 表示每周。默认只显示每周圆环。
+- **跟随 Windows**：支持深浅任务栏、DPI 缩放、自动隐藏和全屏隐藏；可拖动、锁定位置。
+- **托盘与面板同步**：共享样式、周期和颜色；托盘还可选择紧凑数字和状态标记。
+- **原生设置**：颜色、尺寸预设、深浅预览放在基础区，位置、线宽和字重等细调收进高级设置。
+- **保持轻量**：Rust + Win32 + CPU 矢量绘制，无 WebView、无字体下载、无持续动画；复用现有额度请求。
+- **中英文界面**：跟随系统或手动切换；支持 Windows 静态系统代理和直连。
 
 ## 下载与安装
 
-从 [本 fork 的 Releases](https://github.com/study-233/ailimits/releases/latest) 下载 Windows 11 x64 版本：
+从 [Releases](https://github.com/study-233/ailimits/releases/latest) 下载 Windows 11 x64 构建：
 
-- `AiLimits-Setup-0.1.0.exe`：安装版，包含主程序、认证工具、中英文说明和许可证，支持应用内自动更新。
-- `AiLimits-Portable-0.1.0.zip`：便携版，解压后运行 `ailimits.exe`，以后手动下载更新。
-- `SHA256SUMS.txt`：校验文件；可用 PowerShell 的 `Get-FileHash <文件路径> -Algorithm SHA256` 比对。
+| 文件 | 用途 |
+| --- | --- |
+| `QuotaBar-Setup-<版本>.exe` | 推荐，当前用户安装，支持应用内自动更新 |
+| `QuotaBar-Portable-<版本>.zip` | 解压后运行 `ailimits.exe`，后续手动更新 |
+| `SHA256SUMS.txt` | 使用 `Get-FileHash <文件> -Algorithm SHA256` 校验 |
 
-本 fork 从 **v0.1.0 正式版**重新编号。运行旧 `0.6.4` 开发构建的用户需要首次手动安装；旧构建不会将较小的版本号识别为更新。安装目录、配置路径和安装标识沿用原项目，因此安装版会替换已有安装，不能与上游安装版并行安装。原有配置继续读取。
+v0.2.0 的构建产物采用 QuotaBar 名称；公开下载以 Releases 中实际发布的版本为准。此仓库未发布到 winget、Scoop、Chocolatey 或 Microsoft Store。
 
-首次安装也可以使用 PowerShell：
+从 v0.1.0 覆盖安装后，Windows 应用列表将显示 **QuotaBar**。原有配置、凭据和位置继续保留，旧名称快捷方式会清理。程序内部文件名仍为 `ailimits.exe`，配置仍在 `%APPDATA%\AiLimits\config.toml`。旧 `0.6.4` 开发版本需首次手动升级。
+
+也可使用下载并验证安装器的脚本：
 
 ```powershell
 irm https://raw.githubusercontent.com/study-233/ailimits/master/install.ps1 | iex
 ```
 
-## 快速使用
+## 三步开始
 
-1. 先正常登录并使用相应官方 CLI，然后运行 `ailimits.exe`。小组件读取已有认证信息，不主动刷新或轮换官方 CLI 的令牌。
-2. 默认在任务栏显示 Codex 每周余量圆环，右侧上方显示大号数字如 `68 %`，下方居中显示小号 `Codex`。亮色弧线代表剩余额度，100% 是完整圆环，0% 只显示底环；不使用会话额度替代每周额度。右键可设置服务商、语言和网络代理。
-3. 已移除桌面悬浮窗，只保留任务栏面板和手动选择的托盘入口。右键“外观设置…”可分别调整圆环与数字。
-4. “语言”提供“跟随系统／简体中文／English”。默认按 Windows 显示语言选择：中文系统使用简体中文，其他系统使用英文。菜单切换立即生效并保存。
-5. “网络代理”提供“跟随系统／直连”。默认跟随 Windows 当前用户的系统代理，适配 Clash、v2rayN 等软件开启的系统代理。
+1. 在官方 Codex CLI 中登录账号，然后启动 `ailimits.exe`。
+2. 右键任务栏面板 → **外观设置…**，选择圆环或横条，以及需要显示的周期。
+3. 点击**保存**。修改会实时预览，取消或关闭窗口会恢复之前的外观。
 
-中文绘制优先使用系统微软雅黑，按需加载并在设置窗口和任务栏提示间共享；无需下载或随应用分发字体。精简过的 Windows 需要保留系统中文字体。
+![QuotaBar 原生外观设置](docs/images/fluent-settings-zh-dark.png)
 
-## 余量与数据状态
+拖动面板可调整水平位置；Esc 取消拖动。“锁定位置”禁止移动，“恢复自动位置”重新寻找空白区域。任务栏拥挤时不会自动切换为托盘，可从菜单手动选择托盘图标。
 
-鼠标停在圆环上可查看 Codex 每周余量、数据状态与本地时间的每周重置时间。额度缺失或无法认证且没有有效数据时显示 `—`；超过 5 分钟的旧数据置灰，推算数据带 `≈`。每周额度按接口的周期长度识别，不依赖它位于主窗口还是次窗口。旧版本 Codex 缓存会等待新请求纠正周期。仅凭过期数据无法保证额度已经重置，以服务商下一次成功返回为准。
+## 常见问题
 
-面板随任务栏自动隐藏，适配系统明暗主题及缩放。按住圆环或数字可水平拖动，松手保存，重启后保持位置；右键“恢复自动位置”可重新寻找空白区。手动位置允许与应用图标重叠，界面不会强行吸附或缩小。
+**数字表示已用还是剩余？** 统一表示剩余。100% 为满环／满条，0% 只保留底轨。
 
-自动定位优先寻找空白区，空间不足或检测失败时保持上次位置。只有手动选择“托盘图标”才进入托盘；空间不足、开始菜单遮挡或检测失败不会自动切换。全屏应用运行时面板随任务栏隐藏，恢复后回到原位置。托盘和面板统一显示 Codex 每周剩余额度。
+**Plus 的 5 小时额度能显示吗？** 可以读取账号接口返回的 5 小时周期，不按套餐名称限制；没有该周期时显示 `—`，不会拿每周额度代替。
 
-数字使用 Segoe UI Semibold，缺失时回退 Segoe UI；数字使用固定字位宽度，百分号和估算符号缩小并对齐基线。
+**Pro 的悬停提示显示什么？** 明确识别为 `pro` 或 `prolite` 的账号，悬停提示只显示周额度；不改变用户选择的图形展示。
 
-旧配置若已指定托盘模式，可通过“任务栏指示器 → 任务栏面板”切换为圆环加数字。
+**灰色或 `≈` 是什么？** 灰色表示缺失、过期或估算状态，`≈` 表示估算。悬停查看周期、状态和本地时间的重置提示。仅凭重置时间已过，不能确认额度已恢复。
 
-## 外观与位置
+**为什么旧版有 fork？** 旧安装器把它写进了应用名称。v0.2.0 改用独立名称 QuotaBar，覆盖安装即可更新显示名称。
 
-百分比与 `Codex` 标签组成上下两行，整体跟随数字位置和颜色设置。标签为 Segoe UI 常规字体，默认高度 9 DIP，行间距 2 DIP。两行始终显示：数字过大时仅缩小实际显示尺寸，不修改保存的字号。无有效数据时显示 `—` 和 `Codex`，过期数据两行一起置灰。托盘仍显示圆环。
+**会修改 CLI 令牌吗？** 应用读取现有认证信息，不主动刷新或轮换官方 CLI 的令牌。手动设置的密钥存储在 Windows 凭据管理器。
 
-右键“外观设置…”提供圆环、数字独立的颜色、大小及水平位置和垂直偏移。圆环支持线宽；数字支持常规、半粗、粗体，以及百分号和估算符号的比例。颜色可使用原生选色器或输入 `#RRGGBB`，数字输入 `auto` 跟随任务栏主题。预览同时展示深浅主题，并即时更新任务栏；“保存”持久化，“取消”或关闭恢复原设置，“恢复默认外观”只重置外观。
+**其他服务商呢？** 保留 Claude、Copilot、Antigravity 的现有接入能力；本轮任务栏和托盘的额度显示聚焦 Codex。
 
-大小和位置以 DIP 计量，随 Windows 缩放保持一致；垂直偏移会限制在任务栏内部。元素可以重叠；面板宽度随所选外观计算，不因任务栏拥挤缩小。
+代理规则、认证命令和配置路径见[配置与网络](docs/zh-CN/CONFIG.md)。
 
-未锁定时按住圆环或数字水平拖动，松手保存；按 Esc 取消拖动。“锁定位置”固定当前面板位置并禁止拖动，重启后保持；解锁不移动面板。“恢复自动位置”解除锁定并重新寻找空白区域。空间不足、图标增减或检测失败不会自动切回托盘。
+## 从源码构建
 
-## 系统代理
-
-- 开启代理软件的“系统代理”后，小组件下一次网络请求会自动采用新设置。关闭代理或切换端口同样无需重启；已有请求正常结束，刷新频率保持原设置。
-- 兼容 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 及其小写形式，按 reqwest 0.12 的优先级解析。协议专用环境变量优先于对应的 Windows 系统设置；`ALL_PROXY` 是回退项。排除列表沿用该库的匹配语义。
-- 环境变量中的代理地址可以使用 `http://127.0.0.1:7890`、`socks5://127.0.0.1:1080` 或 `socks5h://127.0.0.1:1080`。地址和端口以代理软件实际设置为准。
-- “直连”忽略系统代理和代理环境变量；代理连接失败不会自动转为直连。TUN/VPN 在操作系统网络层生效，不受应用直连选项控制。
-- 本轮支持静态系统代理，不支持 PAC 脚本或 WPAD 自动发现，也没有单独的手动代理地址编辑界面。使用代理软件时请选择写入静态系统代理的模式。
-- 外部修改环境变量不会改变已运行进程的环境，因此需要重启小组件；Windows 系统代理设置变化无需重启。
-
-四个服务商、`ailimits-auth.exe` 的令牌验证、更新检查和更新下载均使用相同代理策略。HTTPS 仍验证服务器证书；代理适配不关闭 TLS 验证。
-
-## 配置
-
-配置文件为 `%APPDATA%\AiLimits\config.toml`。右键菜单的修改自动保存。已有配置无需手动迁移，缺少新字段时使用默认值。
-
-```toml
-[general]
-language = "auto" # auto / zh-CN / en
-indicator = "panel_rows" # 每周余量圆环＋数字
-panel_locked = false # 勾选“锁定位置”后禁止拖动和自动避让
-# panel_position_x = 420 # 可选：距所选任务栏左侧的 DIP 坐标；删除此项恢复自动定位
-
-[network]
-proxy_mode = "system" # system / direct
-```
-
-手动编辑配置后重启应用。未知的语言或代理模式值会回退到默认值，不影响其他设置。完整配置选项参见 [英文配置说明](docs/en/CONFIG.md)。
-
-## 认证工具
-
-`ailimits-auth.exe` 使用同一配置文件中的语言及代理选项：
+需要 Windows、Rust MSVC 工具链、Visual Studio C++ Build Tools 和 Windows SDK。
 
 ```powershell
-.\ailimits-auth.exe status
-.\ailimits-auth.exe set copilot
-.\ailimits-auth.exe set claude
-.\ailimits-auth.exe set-usage-token codex
-.\ailimits-auth.exe remove copilot
-.\ailimits-auth.exe remove-usage-token codex
-```
-
-密钥输入隐藏，保存在 Windows 凭据管理器中；`set-usage-token` 先验证服务商接受该令牌，再保存。品牌名称、命令、文件名和原始服务端错误保留原文。
-
-## 构建与验证
-
-使用 Windows、Rust MSVC 工具链及 Visual Studio C++ Build Tools（包括 Windows SDK）：
-
-```powershell
-rustup toolchain install stable-x86_64-pc-windows-msvc
-rustup component add --toolchain stable-x86_64-pc-windows-msvc rustfmt clippy
 cargo +stable-x86_64-pc-windows-msvc fmt --all -- --check
-cargo +stable-x86_64-pc-windows-msvc clippy --all-targets -- -D warnings
-cargo +stable-x86_64-pc-windows-msvc test
-cargo +stable-x86_64-pc-windows-msvc build --profile release-min --bins
+cargo +stable-x86_64-pc-windows-msvc clippy --locked --all-targets -- -D warnings
+cargo +stable-x86_64-pc-windows-msvc test --locked
+cargo +stable-x86_64-pc-windows-msvc build --locked --profile release-min --bins
 ```
 
-生成文件为 `target\release-min\ailimits.exe` 和 `target\release-min\ailimits-auth.exe`。运行本地编译版无需安装器。网络测试只访问本地模拟服务器，不使用真实令牌。
+产物位于 `target/release-min/`。使用 Inno Setup 6 构建安装器：
 
-## 更新
+```powershell
+./tools/package-release.ps1 -Version 0.2.0 -Iscc 'C:\路径\ISCC.exe'
+```
 
-应用内自动更新使用 [study-233/ailimits Releases](https://github.com/study-233/ailimits/releases)，没有 Release 时跳过，不回退到上游仓库。安装器仍需通过 GitHub 发布的 SHA-256 摘要校验。便携版／开发构建沿用原项目行为，不自动运行安装器。
+网络测试只使用本地模拟服务，不依赖真实令牌。渲染预览与原生设置验证说明见[开发验证](docs/en/VALIDATION.md)。
 
-本 fork 暂未发布到 winget、Scoop、Chocolatey 或 Microsoft Store；这些渠道中的原项目包不包含本 fork 的改动。许可证与原作者署名见 [LICENSE](LICENSE)，名称及标志说明见 [TRADEMARKS.md](TRADEMARKS.md)。
+## 致谢与许可
+
+基于 [napxlexn/ailimits](https://github.com/napxlexn/ailimits)，由 study-233 独立维护。原始代码 Copyright (C) 2026 napxlexn，修改部分由 study-233 维护。
+
+遵循 [GPL-3.0-or-later](LICENSE)。保留上游署名和[名称及标志说明](TRADEMARKS.md)；QuotaBar 使用独立名称和原创图标，不代表上游或 OpenAI 官方产品。

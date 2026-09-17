@@ -24,10 +24,10 @@
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>AI Limits</DisplayName>
+    <DisplayName>QuotaBar</DisplayName>
     <PublisherDisplayName>{{PUBLISHER_DISPLAY}}</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <Description>A native Windows 11 desktop widget showing live Claude, Codex, Copilot and Antigravity usage limits.</Description>
+    <Description>A lightweight Windows 11 taskbar tool for Codex weekly and 5-hour remaining quota.</Description>
   </Properties>
 
   <Dependencies>
@@ -43,7 +43,7 @@
   <Applications>
     <Application Id="AiLimits" Executable="ailimits.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="AI Limits"
+        DisplayName="QuotaBar"
         Description="Live Claude, Codex, Copilot and Antigravity usage limits on the desktop, in the tray or on the taskbar."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
@@ -61,7 +61,7 @@
              it off under Settings > Apps > Startup, and the app never touches
              the Run key when packaged. -->
         <desktop:Extension Category="windows.startupTask" Executable="ailimits.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="AiLimitsStartup" Enabled="true" DisplayName="AI Limits" />
+          <desktop:StartupTask TaskId="AiLimitsStartup" Enabled="true" DisplayName="QuotaBar" />
         </desktop:Extension>
       </Extensions>
     </Application>
