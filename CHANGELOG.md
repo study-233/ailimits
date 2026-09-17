@@ -6,6 +6,11 @@ Notable, user-visible changes. Dates are release dates.
 
 First official release of the **study-233 fork**, based on upstream 0.6.4. Earlier entries below describe upstream releases.
 
+### Installer revision - 2026-09-17
+
+- 安装器仅保留简体中文和 English，补齐中文向导与安装选项。版本仍为 0.1.0；仅替换安装包及其 SHA-256，便携包和程序文件不变。旧安装包需手动重新下载，同版本修订不触发自动更新。
+- The revised installer offers only Simplified Chinese and English. The version remains 0.1.0; only the installer and its checksum change. Portable and application binaries are unchanged. Download the installer again manually; this same-version revision does not trigger automatic updates.
+
 ### 中文
 
 - 首个正式版：任务栏圆环与百分比显示 Codex 每周剩余额度，并显示 Codex 标签、数据状态及本地时间的重置提示。

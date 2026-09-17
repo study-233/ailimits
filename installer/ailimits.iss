@@ -28,16 +28,18 @@ SolidCompression=yes
 CloseApplications=yes
 WizardStyle=modern
 DisableProgramGroupPage=yes
+ShowLanguageDialog=yes
+LanguageDetectionMethod=uilanguage
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
+Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [CustomMessages]
 english.Autostart=Start with Windows
-ukrainian.Autostart=Запускати при старті Windows
+chinesesimplified.Autostart=开机自动启动
 english.RunApp=Launch {#AppName}
-ukrainian.RunApp=Запустити {#AppName}
+chinesesimplified.RunApp=启动 {#AppName}
 
 [Tasks]
 Name: "autostart"; Description: "{cm:Autostart}"
@@ -50,6 +52,7 @@ Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\TRADEMARKS.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "languages\ChineseSimplified.LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
