@@ -25,6 +25,8 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
+    pub panel: super::panel::PanelConfig,
+    #[serde(default)]
     pub appearance: super::appearance::Appearance,
     #[serde(default)]
     pub network: NetworkConfig,
@@ -46,6 +48,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            panel: super::panel::PanelConfig::default(),
             appearance: super::appearance::Appearance::default(),
             network: NetworkConfig::default(),
             general: GeneralConfig::default(),

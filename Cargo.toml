@@ -1,6 +1,6 @@
 [package]
 name = "ailimits"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 # Build-from-source floor. Driven by icu_* (via reqwest → url → idna); Cargo
 # emits a clear error on an older toolchain instead of a deep dependency error.
@@ -41,7 +41,7 @@ fontdue = "0.9"
 
 # --- Async runtime ---
 # Only the features we actually use, not "full".
-tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "process", "sync", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "process", "sync", "macros", "io-util"] }
 
 # --- HTTP ---
 # HTTP client with TLS (rustls, no OpenSSL).
@@ -112,6 +112,8 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     # Named mutex — the single-instance guard.
     "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_System_Diagnostics_ToolHelp",
     # SECURITY_ATTRIBUTES for CreateMutexW.
     "Win32_Security",
     # GetLastInputInfo — idle detection for adaptive polling.

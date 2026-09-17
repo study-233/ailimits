@@ -93,6 +93,11 @@ pub enum MetricWindow {
 /// A single provider metric.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metric {
+    /// Original live observation time; retained when a cached metric fills a missing slot.
+    #[serde(default)]
+    pub observed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub window_seconds: Option<u64>,
     /// Label, e.g. "Session", "Weekly".
     pub label: String,
     /// Used amount.
@@ -180,6 +185,9 @@ pub const EXHAUSTED_PCT: f32 = 100.0;
 /// Provider data for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderData {
+    /// Opaque account scope, never a credential or email.
+    #[serde(default)]
+    pub account_key: Option<String>,
     /// Subscription returned with this usage snapshot; unknown in older caches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_type: Option<String>,
@@ -312,6 +320,7 @@ impl ProviderData {
             .collect();
 
         ProviderData {
+            account_key: self.account_key.clone(),
             plan_type: self.plan_type.clone(),
             id: self.id.clone(),
             status: if any_reset_passed {

@@ -33,6 +33,7 @@ pub struct Scheduler {
     /// Interval in seconds — shared, read before every cycle.
     interval_secs: SharedInterval,
     cmd_tx: mpsc::Sender<AppCommand>,
+    refresh: tokio::sync::watch::Receiver<()>,
 }
 
 impl Scheduler {
@@ -40,11 +41,13 @@ impl Scheduler {
         providers: SharedProviders,
         interval_secs: SharedInterval,
         cmd_tx: mpsc::Sender<AppCommand>,
+        refresh: tokio::sync::watch::Receiver<()>,
     ) -> Self {
         Self {
             providers,
             interval_secs,
             cmd_tx,
+            refresh,
         }
     }
 
@@ -57,7 +60,7 @@ impl Scheduler {
     ///     resuming immediately on activity.
     ///   - Back off (up to MAX_BACKOFF_SECS) when a whole cycle yields no
     ///     success, resetting to the baseline the moment anything succeeds.
-    pub async fn run(self) {
+    pub async fn run(mut self) {
         info!(
             "Scheduler started, interval {}s",
             self.interval_secs.load(Ordering::Relaxed)
@@ -82,7 +85,10 @@ impl Scheduler {
                     debug!("idle/locked — pausing polling");
                     was_paused = true;
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(PAUSE_RECHECK_SECS)).await;
+                tokio::select! {
+                    _=tokio::time::sleep(std::time::Duration::from_secs(PAUSE_RECHECK_SECS))=>{},
+                    result=self.refresh.changed()=>{if result.is_err(){return;}first_run=true;}
+                }
                 continue;
             }
             if was_paused {
@@ -92,6 +98,7 @@ impl Scheduler {
             first_run = false;
 
             let any_ok = self.fetch_all().await;
+            self.refresh.borrow_and_update(); // Coalesce all clicks covered by this fetch.
 
             let base = self
                 .interval_secs
@@ -106,7 +113,10 @@ impl Scheduler {
                 debug!("no provider succeeded — backing off to {backoff}s");
                 backoff
             };
-            tokio::time::sleep(std::time::Duration::from_secs(sleep)).await;
+            tokio::select! {
+                _=tokio::time::sleep(std::time::Duration::from_secs(sleep))=>{},
+                result=self.refresh.changed()=>{if result.is_err(){return;}first_run=true;}
+            }
         }
     }
 

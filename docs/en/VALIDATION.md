@@ -77,3 +77,28 @@ A single hover-summary function now supplies both surfaces, including the legacy
 All 128 non-interactive tests passed, along with `fmt --check`, Clippy for all targets with warnings denied, `git diff --check`, and the release-min build. Regression coverage checks actual period-colored pixels in tray and panel renders for both shapes, all three period selections, both themes and 16/20/24/32-pixel tray sizes; switching shape, numeric color or numeric weight changes the rendered result. Existing layout tests cover 100/125/150/200% scaling. Offscreen production exports were inspected in light and dark themes (`target/quotabar-preview/synchronized-*.png`). These exports do not open or manipulate desktop windows.
 
 The acceptance binary is `target/appearance-sync/QuotaBar.exe`, copied from `target/release-min/ailimits.exe` with matching SHA-256. The old `target/scroll-fix/QuotaBar.exe` process was left running for the user to exit before opening the new binary. Per the user's preference, no automatic launch or live desktop acceptance was performed.
+
+
+## Complete quota panel — v0.3.0 (2026-09-17)
+
+The popup now has an independent, stable five-module layout. Base quota polling remains in the existing scheduler; on-demand App Server reads add reset credits and daily Token buckets. There is no WebView, database, chart framework or resident Codex helper. Existing dependency features add Tokio pipe I/O and Win32 job/thread APIs.
+
+The automated suite covers time ratios, pace, missing fields, account isolation and rotation, count-only/zero/unavailable reset opportunities, observation deduplication/anchors, token upserts, gaps, reset boundaries, retention and configuration migration. A local PowerShell protocol fixture verifies bounded reads, timeout and cleanup of a real child process tree without Codex credentials or network access.
+
+Run these native checks separately (Tao owns one event loop per process):
+
+```powershell
+cargo +stable-x86_64-pc-windows-msvc test --locked native_complete_panel_hidden_render_and_scroll -- --ignored --test-threads=1
+cargo +stable-x86_64-pc-windows-msvc test --locked native_panel_settings_hidden_controls -- --ignored --test-threads=1
+```
+
+These checks create hidden, isolated production Win32 windows. They exercise 96/120/144/192 drawing scale, scroll, fixed controls, chart ranges, cached bitmap reuse, timer removal, checkboxes, drag handles, arrow reordering, defaults, all-hidden state, save/cancel events and serialization. Rendering uses their own memory DCs and explicit child coordinates, never screenshots of another application or the desktop. Synthetic render artifacts are in `target/quotabar-complete` and selected samples in `docs/images`.
+
+Hidden controls and synthetic DPI do not establish actual foreground/focus behavior, mixed-DPI monitor transitions, shell/taskbar auto-hide, or per-account availability of live service extensions. Final visual and interactive acceptance belongs to the user. This build does not replace or restart the installed running app.
+
+Production artifact: `target/release-min/ailimits.exe`. Quit the running version before opening it because QuotaBar is single-instance.
+
+Release preparation passed formatting, Clippy with warnings denied, all 136 automated tests, and the release-min build for both binaries. The separate hidden native panel and settings checks also passed. Local packaging verified version 0.3.0 in Cargo, the installer and both x64 PE resources, portable archive contents (including the new panel screenshots), and SHA-256 checksums. The main executable is 3.84 MB. Physical multi-monitor and final visual acceptance remain with the user.
+
+
+Latest results: 136 automated tests passed (9 desktop/environment-dependent tests excluded from the default run); both hidden native checks above passed separately. Formatting, Clippy with warnings denied, diff whitespace checks and the release-min build passed. The original output was initially locked by the running old executable. After the user exited it and requested replacement, the offline release-min build from `target/acceptance` was copied to `target/release-min/ailimits.exe` and its SHA-256 verified against the build output. Delivered executable size: 3,840,000 bytes. The application was not automatically started; user acceptance remains pending.

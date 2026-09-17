@@ -54,6 +54,15 @@ pub enum UserEvent {
     AppearancePreview(crate::config::appearance::Appearance),
     AppearanceSave(crate::config::appearance::Appearance),
     AppearanceCancel,
+    PanelPreview(crate::config::panel::PanelConfig),
+    PanelSave(crate::config::panel::PanelConfig),
+    PanelCancel,
+    RefreshQuota(bool),
+    ExtensionsUpdated(crate::meter::extras::Snapshot),
+    #[cfg(windows)]
+    OpenHistory(crate::ui::quota_popover::ChartKind),
+    OpenQuotaSettings,
+    OpenQuotaMenu,
     Command(AppCommand),
     Menu(muda::MenuId),
     Tray(TrayKind),
@@ -74,7 +83,7 @@ pub enum UserEvent {
 /// Tray interactions we care about.
 #[derive(Debug)]
 pub enum TrayKind {
-    /// Left-click → toggle the overlay window's visibility.
+    /// Left-click → toggle quota details.
     LeftClick,
 }
 
@@ -100,6 +109,7 @@ fn eval_panel_visibility(
 /// Loading placeholder before the first fetch.
 fn loading_data(id: ProviderId) -> ProviderData {
     ProviderData {
+        account_key: None,
         plan_type: None,
         id,
         status: ProviderStatus::Loading,
@@ -174,7 +184,10 @@ fn merge_cached_metrics(mut data: ProviderData, cached: Option<&ProviderData>) -
     let Some(cached) = cached else {
         return data;
     };
-    if data.id != cached.id || !matches!(cached.status, ProviderStatus::Ok) {
+    if data.id != cached.id
+        || data.account_key != cached.account_key
+        || !matches!(cached.status, ProviderStatus::Ok)
+    {
         return data;
     }
 
@@ -426,6 +439,7 @@ pub fn run() -> Result<()> {
         use tao::platform::windows::EventLoopBuilderExtWindows;
         event_loop_builder.with_msg_hook(|message| unsafe {
             crate::ui::appearance_dialog::handle_message(message)
+                || crate::ui::quota_popover::handle_message(message)
         });
     }
     let event_loop = event_loop_builder.build();
@@ -468,7 +482,13 @@ pub fn run() -> Result<()> {
     // from the menu.
     let update_interval: SharedInterval =
         Arc::new(AtomicU64::new(config.general.update_interval_secs));
-    let scheduler = Scheduler::new(providers.clone(), update_interval.clone(), cmd_tx.clone());
+    let (refresh_tx, refresh_rx) = tokio::sync::watch::channel(());
+    let scheduler = Scheduler::new(
+        providers.clone(),
+        update_interval.clone(),
+        cmd_tx.clone(),
+        refresh_rx,
+    );
     runtime.spawn(scheduler.run());
 
     // 4b. Background auto-updater — polls GitHub Releases and silently installs
@@ -505,7 +525,7 @@ pub fn run() -> Result<()> {
         }));
     }
 
-    // 9b. The tray icon: a left-click toggles the overlay; a right-click shows
+    // 9b. The tray icon: a left-click opens quota details; a right-click shows
     // the SAME context menu. Tray menu clicks reuse the MenuEvent handler above.
     let mut tray = Tray::new();
     tray.set_warning_threshold(
@@ -563,20 +583,20 @@ pub fn run() -> Result<()> {
     panel.set_mode(config.general.indicator, &visible_data(&config, &display));
     #[cfg(windows)]
     let mut appearance_dialog = crate::ui::appearance_dialog::AppearanceDialog::new(proxy.clone());
+    #[cfg(windows)]
+    let mut quota_popover = crate::ui::quota_popover::QuotaPopover::new(proxy.clone());
+    let mut quota_history = runtime.block_on(crate::meter::history::load());
+    let history_saver = crate::meter::history::saver(&runtime);
+    let mut extensions = crate::meter::extras::Snapshot::default();
+    let extras_gate = crate::meter::extras::Gate::default();
+    let mut panel_draft = config.panel.clone();
+    let mut meter_dirty = true;
     // Whether the last evaluation saw a fullscreen app: the panel is hidden
     // while true; the falling edge re-presents it (alt-tab back to desktop).
     #[cfg(target_os = "windows")]
     let mut fullscreen_was_active = false;
     #[cfg(target_os = "windows")]
     let mut recheck_at: Option<std::time::Instant> = Some(std::time::Instant::now());
-    // The hover tooltip appears only after the cursor lingers for the system
-    // mouse-hover time (the same delay tray-icon tooltips use), tracked by this
-    // deadline; it is cancelled the moment the cursor leaves.
-    #[cfg(target_os = "windows")]
-    let mut tooltip_at: Option<std::time::Instant> = None;
-    #[cfg(target_os = "windows")]
-    let hover_delay = std::time::Duration::from_millis(crate::platform::mouse_hover_time_ms());
-
     let rt_handle = runtime.handle().clone();
     let cache_rt_handle = rt_handle.clone();
     let save_cached_providers = move |cache: HashMap<ProviderId, ProviderData>| {
@@ -605,7 +625,7 @@ pub fn run() -> Result<()> {
     event_loop.run(move |event, _target, control_flow| {
         #[cfg(target_os = "windows")]
         {
-            let next = [recheck_at, tooltip_at].into_iter().flatten().min();
+            let next = recheck_at;
             *control_flow = match next {
                 Some(t) => ControlFlow::WaitUntil(t),
                 None => ControlFlow::Wait,
@@ -626,8 +646,7 @@ pub fn run() -> Result<()> {
         }
         let _control_owner = _window.id();
         match event {
-            // Scheduled deadlines came due: re-check overlay coverage (toggle the
-            // tray fallback), and/or show the hover tooltip after its delay.
+            // Scheduled deadlines came due: re-check overlay coverage.
             // Idle returns to 0% afterwards (no pending timer).
             #[cfg(target_os = "windows")]
             Event::NewEvents(_) => {
@@ -664,89 +683,77 @@ pub fn run() -> Result<()> {
                         }
                     }
                 }
-                if let Some(t) = tooltip_at {
-                    if now >= t {
-                        tooltip_at = None;
-                        panel.show_tooltip(&visible_data(&config, &display));
-                    }
-                }
             }
             // The embedded panel's own events: a left-click toggles the
             // overlay (like the tray icon), a right-click opens the menu.
             Event::WindowEvent {
                 window_id, event, ..
-            } if window_id == panel.window_id() => {
-                match event {
-                    WindowEvent::MouseInput {
-                        state: ElementState::Pressed,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        panel.set_interaction(true, true, &visible_data(&config, &display));
-                        panel.begin_drag();
-                        #[cfg(windows)]
-                        {
-                            tooltip_at = None;
-                        }
-                    }
-                    WindowEvent::MouseInput {
-                        state: ElementState::Released,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        panel.set_interaction(true, false, &visible_data(&config, &display));
-                        if let Some(x) = panel.finish_drag() {
-                            config.general.panel_position_x = Some(x);
-                            save_config(config.clone());
-                        }
-                    }
-                    WindowEvent::KeyboardInput { event, .. }
-                        if event.logical_key == tao::keyboard::Key::Escape =>
-                    {
-                        panel.cancel_drag();
-                        panel.update(&visible_data(&config, &display), true);
-                    }
-                    WindowEvent::CursorMoved { .. } if panel.is_dragging() => {
-                        panel.move_drag(&visible_data(&config, &display));
-                    }
-                    WindowEvent::MouseInput {
-                        state: ElementState::Pressed,
-                        button: MouseButton::Right,
-                        ..
-                    } => {
-                        #[cfg(target_os = "windows")]
-                        {
-                            use muda::ContextMenu as _;
-                            unsafe {
-                                menu.menu.show_context_menu_for_hwnd(panel.hwnd(), None);
-                            }
-                        }
-                    }
-                    // Our own hover tooltip: arm the system hover delay on
-                    // enter/hover (show only if the cursor lingers, like a
-                    // tray-icon tooltip), hide and cancel on leave.
-                    WindowEvent::CursorEntered { .. } | WindowEvent::CursorMoved { .. } => {
-                        panel.set_interaction(true, false, &visible_data(&config, &display));
-                        #[cfg(target_os = "windows")]
-                        if !panel.is_dragging() && !panel.tooltip_shown() && tooltip_at.is_none() {
-                            tooltip_at = Some(std::time::Instant::now() + hover_delay);
-                        }
-                    }
-                    WindowEvent::ThemeChanged(_) => {
-                        panel.update(&visible_data(&config, &display), true);
-                        tray.update(&visible_data(&config, &display), &theme, true);
-                    }
-                    WindowEvent::CursorLeft { .. } => {
-                        panel.set_interaction(false, false, &visible_data(&config, &display));
-                        panel.hide_tooltip();
-                        #[cfg(target_os = "windows")]
-                        {
-                            tooltip_at = None;
-                        }
-                    }
-                    _ => {}
+            } if window_id == panel.window_id() => match event {
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    panel.set_interaction(true, true, &visible_data(&config, &display));
+                    panel.begin_drag();
                 }
-            }
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    panel.set_interaction(true, false, &visible_data(&config, &display));
+                    let clicked = panel.take_click();
+                    if let Some(x) = panel.finish_drag() {
+                        config.general.panel_position_x = Some(x);
+                        save_config(config.clone());
+                    }
+                    #[cfg(windows)]
+                    if clicked {
+                        if let Err(e) = quota_popover.toggle(
+                            &visible_data(&config, &display),
+                            panel.appearance(),
+                            panel.anchor_rect(),
+                        ) {
+                            warn!("quota popup: {e}");
+                        }
+                    }
+                }
+                WindowEvent::KeyboardInput { event, .. }
+                    if event.logical_key == tao::keyboard::Key::Escape =>
+                {
+                    panel.cancel_drag();
+                    panel.update(&visible_data(&config, &display), true);
+                }
+                WindowEvent::CursorMoved { .. } if panel.is_dragging() => {
+                    panel.move_drag(&visible_data(&config, &display));
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Right,
+                    ..
+                } => {
+                    #[cfg(target_os = "windows")]
+                    {
+                        quota_popover.hide();
+                        use muda::ContextMenu as _;
+                        unsafe {
+                            menu.menu.show_context_menu_for_hwnd(panel.hwnd(), None);
+                        }
+                    }
+                }
+                WindowEvent::CursorEntered { .. } | WindowEvent::CursorMoved { .. } => {
+                    panel.set_interaction(true, false, &visible_data(&config, &display));
+                }
+                WindowEvent::ThemeChanged(_) => {
+                    panel.update(&visible_data(&config, &display), true);
+                    tray.update(&visible_data(&config, &display), &theme, true);
+                }
+                WindowEvent::CursorLeft { .. } => {
+                    panel.set_interaction(false, false, &visible_data(&config, &display));
+                }
+                _ => {}
+            },
 
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -759,7 +766,117 @@ pub fn run() -> Result<()> {
             Event::RedrawRequested(id) if id == panel.window_id() => {
                 panel.redraw(&visible_data(&config, &display));
             }
+            #[cfg(windows)]
+            Event::MainEventsCleared => {
+                if meter_dirty {
+                    let key = display
+                        .iter()
+                        .find(|d| d.id == ProviderId::Codex)
+                        .and_then(|d| d.account_key.as_deref());
+                    let matching = if extensions.account.as_deref() == key {
+                        extensions.clone()
+                    } else {
+                        crate::meter::extras::Snapshot::default()
+                    };
+                    quota_popover.configure(crate::ui::quota_popover::PanelContext {
+                        layout: panel_draft.clone(),
+                        extras: matching,
+                        history: std::rc::Rc::new(quota_history.account(key)),
+                        threshold: thresholds.get(&ProviderId::Codex).copied().unwrap_or(80),
+                        interval: config.general.update_interval_secs,
+                    });
+                    meter_dirty = false;
+                }
+                quota_popover.update(&visible_data(&config, &display), panel.appearance());
+            }
             Event::UserEvent(ue) => match ue {
+                UserEvent::PanelPreview(layout) => {
+                    panel_draft = layout;
+                    meter_dirty = true;
+                }
+                UserEvent::PanelSave(layout) => {
+                    config.panel = layout.clone();
+                    panel_draft = layout;
+                    meter_dirty = true;
+                    save_config(config.clone());
+                }
+                UserEvent::PanelCancel => {
+                    panel_draft = config.panel.clone();
+                    meter_dirty = true;
+                }
+                #[cfg(windows)]
+                UserEvent::OpenHistory(kind) => quota_popover.open_history(kind),
+                UserEvent::ExtensionsUpdated(incoming) => {
+                    let key = display
+                        .iter()
+                        .find(|d| d.id == ProviderId::Codex)
+                        .and_then(|d| d.account_key.clone());
+                    if incoming.account == key {
+                        if let (Some(key), crate::meter::extras::Availability::Ready(days)) =
+                            (&key, &incoming.tokens)
+                        {
+                            if quota_history.update_tokens(key, days, Utc::now()) {
+                                let _ = history_saver.send(Some(quota_history.clone()));
+                            }
+                        }
+                        extensions.merge(incoming);
+                        meter_dirty = true;
+                    }
+                    #[cfg(windows)]
+                    if quota_popover.is_visible() {
+                        let _ = proxy.send_event(UserEvent::RefreshQuota(false));
+                    }
+                }
+                UserEvent::RefreshQuota(force) => {
+                    if force {
+                        let _ = refresh_tx.send(());
+                    }
+                    use crate::config::panel::ModuleId;
+                    let key = display
+                        .iter()
+                        .find(|d| d.id == ProviderId::Codex)
+                        .and_then(|d| d.account_key.clone());
+                    if extensions.account != key {
+                        extensions = crate::meter::extras::Snapshot {
+                            account: key.clone(),
+                            ..Default::default()
+                        };
+                    }
+                    let enabled = crate::meter::extras::Request {
+                        credits: panel_draft.enabled(ModuleId::ResetCredits),
+                        tokens: panel_draft.enabled(ModuleId::TokenActivity),
+                    };
+                    let needed = extensions.needed(enabled, force);
+                    if needed.any() {
+                        if let Some(permit) = extras_gate.enter() {
+                            if needed.credits {
+                                extensions.credits = crate::meter::extras::Availability::Loading;
+                            }
+                            if needed.tokens {
+                                extensions.tokens = crate::meter::extras::Availability::Loading;
+                            }
+                            meter_dirty = true;
+                            let proxy = proxy.clone();
+                            runtime.spawn(async move {
+                                let result = crate::meter::extras::read(key, needed).await;
+                                drop(permit);
+                                let _ = proxy.send_event(UserEvent::ExtensionsUpdated(result));
+                            });
+                        }
+                    }
+                }
+                UserEvent::OpenQuotaSettings => {
+                    #[cfg(windows)]
+                    if let Err(e) =
+                        appearance_dialog.open_settings(&config.appearance, &config.panel, true)
+                    {
+                        warn!("appearance dialog: {e}");
+                    }
+                }
+                UserEvent::OpenQuotaMenu => {
+                    #[cfg(windows)]
+                    quota_popover.show_more(&menu.more);
+                }
                 UserEvent::AppearancePreview(style) => {
                     panel.set_appearance(style.clone());
                     tray.set_appearance(style);
@@ -783,6 +900,13 @@ pub fn run() -> Result<()> {
                 }
                 UserEvent::Command(cmd) => match cmd {
                     AppCommand::UpdateProvider(data) => {
+                        if quota_history.record(&data) | quota_history.compact(Utc::now()) {
+                            let _ = history_saver.send(Some(quota_history.clone()));
+                        }
+                        if data.id == ProviderId::Codex {
+                            meter_dirty = true;
+                        }
+
                         // Threshold crossing drives BOTH the toast and the
                         // `on_threshold` hook, sharing one cooldown. The hook
                         // fires even if toasts are disabled (it's its own opt-in).
@@ -918,6 +1042,10 @@ pub fn run() -> Result<()> {
                         }
                         tray.update(&visible_data(&config, &display), &theme, false);
                         panel.update(&visible_data(&config, &display), false);
+                        #[cfg(windows)]
+                        if data.id == ProviderId::Codex && quota_popover.is_visible() {
+                            let _ = proxy.send_event(UserEvent::RefreshQuota(false));
+                        }
                     }
                     AppCommand::Quit => *control_flow = ControlFlow::Exit,
                 },
@@ -966,7 +1094,16 @@ pub fn run() -> Result<()> {
                         Some(std::time::Instant::now() + std::time::Duration::from_millis(150));
                 }
 
-                UserEvent::Tray(TrayKind::LeftClick) => {}
+                UserEvent::Tray(TrayKind::LeftClick) => {
+                    #[cfg(windows)]
+                    if let Err(e) = quota_popover.toggle(
+                        &visible_data(&config, &display),
+                        panel.appearance(),
+                        tray.anchor_rect(),
+                    ) {
+                        warn!("quota popup: {e}");
+                    }
+                }
 
                 UserEvent::Menu(id) => match menu.action_for(&id) {
                     Some(MenuAction::SetLanguage(language)) => {
@@ -978,7 +1115,6 @@ pub fn run() -> Result<()> {
                                 menu = new_menu;
                                 menu.sync(&config);
                                 tray.replace_menu(&menu.menu);
-                                panel.hide_tooltip();
                                 tray.update(&visible_data(&config, &display), &theme, true);
                                 panel.update(&visible_data(&config, &display), true);
                                 save_config(config.clone());
@@ -998,9 +1134,23 @@ pub fn run() -> Result<()> {
                         save_config(config.clone());
                     }
 
+                    Some(MenuAction::OpenQuota) => {
+                        #[cfg(windows)]
+                        if let Err(e) = quota_popover.toggle(
+                            &visible_data(&config, &display),
+                            panel.appearance(),
+                            panel.anchor_rect().or_else(|| tray.anchor_rect()),
+                        ) {
+                            warn!("quota popup: {e}");
+                        }
+                    }
                     Some(MenuAction::OpenAppearance) => {
                         #[cfg(windows)]
-                        if let Err(e) = appearance_dialog.open(&config.appearance) {
+                        if let Err(e) = appearance_dialog.open_settings(
+                            &config.appearance,
+                            &config.panel,
+                            false,
+                        ) {
                             warn!("appearance dialog could not open: {e}");
                         }
                     }
@@ -1228,6 +1378,7 @@ pub fn run() -> Result<()> {
                     }
 
                     Some(MenuAction::SetUpdateInterval(secs)) => {
+                        meter_dirty = true;
                         config.general.update_interval_secs = secs;
                         // The scheduler picks the new value up on its next cycle.
                         update_interval.store(secs, Ordering::Relaxed);
@@ -1328,6 +1479,8 @@ mod tests {
             label: label.to_string(),
             used,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at: None,
             window,
@@ -1336,6 +1489,7 @@ mod tests {
 
     fn data(metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: ProviderId::Claude,
             status: ProviderStatus::Ok,
@@ -1343,6 +1497,24 @@ mod tests {
             updated_at: Utc::now(),
             received_at: Some(std::time::Instant::now()),
         }
+    }
+
+    #[test]
+    fn account_changes_never_fill_from_another_accounts_cache() {
+        let mut live = data(vec![pct("Session", 12, MetricWindow::Session)]);
+        live.id = ProviderId::Codex;
+        live.account_key = Some("new-account".into());
+        let mut cached = data(vec![pct("Weekly", 94, MetricWindow::Long)]);
+        cached.id = ProviderId::Codex;
+        cached.account_key = Some("old-account".into());
+        assert_eq!(
+            merge_cached_metrics(live.clone(), Some(&cached))
+                .metrics
+                .len(),
+            1
+        );
+        cached.account_key = None;
+        assert_eq!(merge_cached_metrics(live, Some(&cached)).metrics.len(), 1);
     }
 
     #[test]

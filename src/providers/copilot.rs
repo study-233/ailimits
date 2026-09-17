@@ -66,6 +66,7 @@ impl CopilotProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: self.id(),
             status,
@@ -243,6 +244,8 @@ pub fn parse_copilot_quotas(body: &str) -> Result<Vec<Metric>> {
                 label: label.to_string(),
                 used,
                 limit: Some(limit),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Requests,
                 reset_at,
                 window: MetricWindow::Session,

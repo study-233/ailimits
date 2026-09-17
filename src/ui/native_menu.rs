@@ -496,11 +496,18 @@ pub(super) unsafe fn test_menu_paths(root: HMENU) -> Vec<Vec<usize>> {
     unsafe fn walk(menu: HMENU, prefix: Vec<usize>, root: bool, paths: &mut Vec<Vec<usize>>) {
         let mut ordinal = 0;
         for index in 0..GetMenuItemCount(menu).max(0) as u32 {
-            let flags = GetMenuState(menu, index, MF_BYPOSITION);
-            if flags & (MF_SEPARATOR.0 | MF_DISABLED.0 | MF_GRAYED.0) != 0 {
+            // GetMenuState packs a submenu's item count into the high byte,
+            // where it can look like MF_SEPARATOR. Query type/state separately.
+            let mut info = MENUITEMINFOW {
+                cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE | MIIM_STATE | MIIM_SUBMENU,
+                ..Default::default()
+            };
+            GetMenuItemInfoW(menu, index, true, &mut info).unwrap();
+            if info.fType.contains(MFT_SEPARATOR) || info.fState.0 & 3 != 0 {
                 continue;
             }
-            let child = GetSubMenu(menu, index as i32);
+            let child = info.hSubMenu;
             if !child.is_invalid() {
                 let mut path = prefix.clone();
                 path.extend(std::iter::repeat_n(0x28, ordinal + usize::from(root)));

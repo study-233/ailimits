@@ -54,25 +54,11 @@ fn theme_ink(light: bool) -> (Color, Color) {
     }
 }
 
-/// Premultiplied RGBA (tiny-skia) → premultiplied BGRA (top-down) for
-/// UpdateLayeredWindow.
-#[cfg(target_os = "windows")]
-fn pixmap_to_bgra(pm: &Pixmap) -> Vec<u8> {
-    let data = pm.data();
-    let mut bgra = vec![0u8; data.len()];
-    for (s, d) in data.chunks_exact(4).zip(bgra.chunks_exact_mut(4)) {
-        d[0] = s[2];
-        d[1] = s[1];
-        d[2] = s[0];
-        d[3] = s[3];
-    }
-    bgra
-}
-
 pub struct TaskbarPanel {
     warning_remaining: f32,
     hovered: bool,
     pressed: bool,
+    click_pending: bool,
     locked: bool,
     appearance: Appearance,
     content_width: f32,
@@ -96,13 +82,6 @@ pub struct TaskbarPanel {
     /// which is normal and needs no substitute — the tray icon lives in that
     /// same bar and would be hidden with it.
     unavailable: bool,
-    /// Our own hover-tooltip window (a raw layered top-level window we paint),
-    /// and whether it is currently shown. Painted dark/rounded/borderless to
-    /// match the shell's tooltips, which a native control cannot.
-    #[cfg(target_os = "windows")]
-    tip_hwnd: isize,
-    #[cfg(target_os = "windows")]
-    tip_shown: bool,
     /// Last UpdateLayeredWindow error code, so a failing present is logged
     /// once per distinct cause instead of on every provider tick. `None`
     /// means the last present succeeded (or none has run yet) — distinct
@@ -121,23 +100,6 @@ struct PanelDrag {
     original: Option<i32>,
     last_original: Option<i32>,
     moved: bool,
-}
-
-/// The tooltip window is ours, created with CreateWindowExW; nothing else owns
-/// it. Harmless to leak while exactly one panel lives for the whole process,
-/// but `restart()` already exists as the "rebuild the panel" path, and the day
-/// that becomes "make a new TaskbarPanel" the old window would outlive it.
-///
-/// **This does not run on a normal exit.** `tao::EventLoop::run` is `-> !` and
-/// terminates the process from inside, so the closure holding the panel is
-/// never dropped. The window is reclaimed by the OS instead. This impl exists
-/// for the case above — a panel dropped while the process keeps running — and
-/// is deliberately a no-op today rather than a fix for a live leak.
-impl Drop for TaskbarPanel {
-    fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
-        crate::platform::destroy_window(self.tip_hwnd);
-    }
 }
 
 impl TaskbarPanel {
@@ -165,6 +127,7 @@ impl TaskbarPanel {
             warning_remaining: 20.0,
             hovered: false,
             pressed: false,
+            click_pending: false,
             locked: false,
             appearance: Appearance::default(),
             content_width: appearance_width(&Appearance::default()),
@@ -179,17 +142,6 @@ impl TaskbarPanel {
             rect: None,
             suppressed: false,
             unavailable: false,
-            #[cfg(target_os = "windows")]
-            // No DWM blur here, deliberately. It tints and blurs the whole
-            // WINDOW rectangle, not the rounded box we paint inside it, so once
-            // the pixmap grew a margin for the drop shadow the blur showed up
-            // as a hard-edged grey rectangle around the tooltip. Measurement
-            // says we do not want it anyway: the shell's tooltip is alpha ~244,
-            // i.e. all but opaque, and what separates it from the background is
-            // the shadow.
-            tip_hwnd: crate::platform::create_tooltip_window(),
-            #[cfg(target_os = "windows")]
-            tip_shown: false,
             last_present_error: None,
             offset: (0, 0),
             display: crate::config::schema::PanelDisplay::Primary,
@@ -247,9 +199,7 @@ impl TaskbarPanel {
 
     pub fn begin_drag(&mut self) {
         self.cancel_drag();
-        if self.locked {
-            return;
-        }
+        self.click_pending = true;
         #[cfg(windows)]
         if let Some((left, _, _, _)) = self.rect {
             use windows::Win32::{
@@ -263,7 +213,6 @@ impl TaskbarPanel {
                 }
                 SetCapture(HWND(self.hwnd() as _));
             }
-            self.hide_tooltip();
             self.drag = Some(PanelDrag {
                 pointer_x: point.x,
                 left,
@@ -303,6 +252,11 @@ impl TaskbarPanel {
                 return;
             }
             drag.moved = true;
+            // Locked entries still track the gesture, so a drag does not
+            // become a click merely because moving the panel is disabled.
+            if self.locked {
+                return;
+            }
             let x =
                 (drag.left + dx).clamp(slot.left, (slot.right - self.size.0 as i32).max(slot.left));
             self.position_x = Some(((x - slot.left) as f32 / scale).round() as i32);
@@ -312,11 +266,29 @@ impl TaskbarPanel {
         let _ = providers;
     }
 
+    pub fn appearance(&self) -> &Appearance {
+        &self.appearance
+    }
+    #[cfg(windows)]
+    pub fn anchor_rect(&self) -> Option<windows::Win32::Foundation::RECT> {
+        self.rect
+            .map(|(x, y, w, h)| windows::Win32::Foundation::RECT {
+                left: x,
+                top: y,
+                right: x + w as i32,
+                bottom: y + h as i32,
+            })
+    }
+    pub fn take_click(&mut self) -> bool {
+        let click = self.click_pending && !self.drag.as_ref().is_some_and(|d| d.moved);
+        self.click_pending = false;
+        click
+    }
     /// Returns the new persistent X only for a completed drag, not a click.
     pub fn finish_drag(&mut self) -> Option<i32> {
         let drag = self.drag.take()?;
         self.release_capture();
-        if drag.moved {
+        if drag.moved && !self.locked {
             self.position_x
         } else {
             None
@@ -324,6 +296,7 @@ impl TaskbarPanel {
     }
 
     pub fn cancel_drag(&mut self) {
+        self.click_pending = false;
         if let Some(drag) = self.drag.take() {
             self.position_x = drag.original;
             self.last_position_x = drag.last_original;
@@ -402,60 +375,6 @@ impl TaskbarPanel {
             self.last = Some(state);
             self.redraw(providers);
         }
-        #[cfg(target_os = "windows")]
-        if self.tip_shown {
-            self.hide_tooltip();
-            self.show_tooltip(providers);
-        }
-    }
-
-    /// Show the hover tooltip — the provider summary in a dark, rounded,
-    /// borderless pill centered above the overlay — painted by us so it matches
-    /// the shell's own tooltips. Idempotent while shown; no-op if the panel is
-    /// hidden (no rect). Called from the overlay's CursorEntered.
-    pub fn show_tooltip(&mut self, providers: &[ProviderData]) {
-        #[cfg(target_os = "windows")]
-        {
-            if self.tip_shown || self.tip_hwnd == 0 || self.drag.is_some() {
-                return;
-            }
-            let Some((px, py, pw, _ph)) = self.rect else {
-                return;
-            };
-            let text = super::quota_view::hover_tooltip(providers, &self.appearance);
-            let light = crate::platform::system_uses_light_theme();
-            let pm = crate::ui::tray::render_tooltip(&text, self.size.1 as f32, light);
-            let (w, h) = (pm.width() as i32, pm.height() as i32);
-            // The pixmap carries the drop shadow around the box, so the box's
-            // own bottom edge sits `shadow` above the pixmap's — add it back or
-            // the gap to the bar comes out short by that much.
-            let shadow = crate::ui::tray::tip_shadow_inset(self.size.1 as f32);
-            let mut tx = px + (pw as i32 - w) / 2;
-            if let Some((left, _, right, _)) = crate::platform::work_area_at(px, py) {
-                tx = tx.clamp(left, (right - w).max(left));
-            }
-            let ty = py - crate::ui::tray::TIP_GAP - h + shadow;
-            let bgra = pixmap_to_bgra(&pm);
-            let _ = crate::platform::present_layered(self.tip_hwnd, &bgra, tx, ty, w, h);
-            self.tip_shown = true;
-        }
-        #[cfg(not(target_os = "windows"))]
-        let _ = providers;
-    }
-
-    /// Hide the hover tooltip (cursor left the overlay, or the panel is hiding).
-    pub fn hide_tooltip(&mut self) {
-        #[cfg(target_os = "windows")]
-        if self.tip_shown {
-            crate::platform::hide_window(self.tip_hwnd);
-            self.tip_shown = false;
-        }
-    }
-
-    /// Whether the hover tooltip is currently shown.
-    #[cfg(target_os = "windows")]
-    pub fn tooltip_shown(&self) -> bool {
-        self.tip_shown
     }
 
     /// Re-assert the overlay's topmost z-order after another window covered it
@@ -564,7 +483,6 @@ impl TaskbarPanel {
 
     fn hide(&mut self) {
         self.cancel_drag();
-        self.hide_tooltip();
         #[cfg(target_os = "windows")]
         crate::platform::hide_window(self.hwnd());
         self.rect = None;
@@ -961,7 +879,6 @@ mod tests {
     #[ignore = "writes visual review sheets; run in isolation because language is process-global"]
     fn preview_weekly_ring() {
         use crate::config::schema::Language;
-        use crate::ui::tray::render_tooltip;
         let dir = std::path::Path::new("target/weekly-preview");
         std::fs::create_dir_all(dir).unwrap();
         for (language, code) in [(Language::Chinese, "zh-CN"), (Language::English, "en")] {
@@ -1015,13 +932,6 @@ mod tests {
                             tiny_skia::Transform::identity(),
                             None,
                         );
-                        // Tooltip gets its own row across the full sheet width in separate artifacts.
-                        let tooltip = render_tooltip(&state.tooltip(), 48.0 * scale, light);
-                        tooltip
-                            .save_png(
-                                dir.join(format!("{code}-{percent}-{light}-{row}-tooltip.png")),
-                            )
-                            .unwrap();
                     }
                 }
                 sheet

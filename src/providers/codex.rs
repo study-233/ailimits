@@ -39,6 +39,7 @@ impl CodexProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: self.id(),
             status,
@@ -106,6 +107,10 @@ impl CodexProvider {
                 }
                 let mut data = self.data(ProviderStatus::Ok, metrics);
                 data.plan_type = plan_type;
+                for m in &mut data.metrics {
+                    m.observed_at = Some(data.updated_at);
+                }
+                data.account_key = Some(crate::meter::identity::token_identity(token).key);
                 Ok(Some(data))
             }
             401 | 403 => Ok(None),
@@ -136,10 +141,7 @@ impl Provider for CodexProvider {
 ///
 /// Structure verified 2026-06-10: {"auth_mode": ..., "tokens": {"access_token": ...}, ...}
 async fn read_codex_token() -> Result<Option<String>> {
-    let path = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".codex")
-        .join("auth.json");
+    let path = crate::meter::identity::codex_home().join("auth.json");
     if !path.exists() {
         return Ok(None);
     }
@@ -205,6 +207,8 @@ pub fn parse_wham_snapshot(body: &str) -> Result<(Vec<Metric>, Option<String>)> 
                 label: label.to_string(),
                 used: pct,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: field.get("limit_window_seconds").and_then(|v| v.as_u64()),
                 unit: MetricUnit::Percent,
                 reset_at,
                 window,

@@ -8,6 +8,7 @@ pub mod app;
 pub mod config;
 pub mod hooks;
 pub mod i18n;
+pub mod meter;
 pub mod monitor;
 pub mod network;
 pub mod notifications;

@@ -11,6 +11,8 @@ fn metric(used: u64, limit: Option<u64>) -> Metric {
         label: "Session".to_string(),
         used,
         limit,
+        observed_at: None,
+        window_seconds: None,
         unit: MetricUnit::Requests,
         reset_at: None,
         window: MetricWindow::Session,
@@ -34,6 +36,8 @@ fn token_display_text_uses_short_format() {
         label: "Tokens".to_string(),
         used: 112_000,
         limit: Some(1_000_000),
+        observed_at: None,
+        window_seconds: None,
         unit: MetricUnit::Tokens,
         reset_at: None,
         window: MetricWindow::Session,
@@ -208,6 +212,7 @@ fn hover_reason_explains_stale_rows_only() {
     use std::collections::HashMap;
 
     let stale = |id: ProviderId| ProviderData {
+        account_key: None,
         plan_type: None,
         id,
         status: ProviderStatus::Ok,
@@ -215,6 +220,8 @@ fn hover_reason_explains_stale_rows_only() {
             label: "Session".to_string(),
             used: 48,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at: Some(Utc::now() + Duration::hours(2)),
             window: MetricWindow::Session,
@@ -305,6 +312,7 @@ fn stale_data_with_passed_reset_extrapolates_to_zero() {
     // Data from 10 minutes ago; the session reset 5 minutes ago,
     // the weekly reset is in the future.
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -313,6 +321,8 @@ fn stale_data_with_passed_reset_extrapolates_to_zero() {
                 label: "Session".to_string(),
                 used: 100,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(Utc::now() - Duration::minutes(5)),
                 window: MetricWindow::Session,
@@ -321,6 +331,8 @@ fn stale_data_with_passed_reset_extrapolates_to_zero() {
                 label: "Weekly".to_string(),
                 used: 28,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(Utc::now() + Duration::days(3)),
                 window: MetricWindow::Session,
@@ -350,6 +362,7 @@ fn fresh_data_is_not_extrapolated() {
     // Fresh data (30s old) is left intact even with a reset in the past:
     // the next fetch will refine it.
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -357,6 +370,8 @@ fn fresh_data_is_not_extrapolated() {
             label: "Session".to_string(),
             used: 80,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at: Some(Utc::now() - Duration::seconds(10)),
             window: MetricWindow::Session,
@@ -373,6 +388,7 @@ fn fresh_data_is_not_extrapolated() {
 #[test]
 fn primary_percentage_uses_first_metric() {
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -389,6 +405,8 @@ fn window_metric(label: &str, used: u64, window: MetricWindow) -> Metric {
         label: label.to_string(),
         used,
         limit: Some(100),
+        observed_at: None,
+        window_seconds: None,
         unit: MetricUnit::Percent,
         reset_at: None,
         window,
@@ -400,6 +418,7 @@ fn an_exhausted_long_window_becomes_the_headline_for_every_surface() {
     // Claude shape: the weekly cap is spent, so no new session can start —
     // the tray, the taskbar panel and the toast must all read 100%, not 20%.
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -420,6 +439,7 @@ fn an_exhausted_long_window_becomes_the_headline_for_every_surface() {
 #[test]
 fn an_exhausted_opus_pool_counts_even_though_its_label_never_says_week() {
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -440,6 +460,7 @@ fn an_exhausted_opus_pool_counts_even_though_its_label_never_says_week() {
 #[test]
 fn a_long_window_with_headroom_leaves_the_session_in_charge() {
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Codex,
         status: ProviderStatus::Ok,
@@ -467,6 +488,7 @@ fn headline_reset_quotes_the_spent_long_windows_reset_not_the_soonest() {
     // not.
     let now = Utc::now();
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -475,6 +497,8 @@ fn headline_reset_quotes_the_spent_long_windows_reset_not_the_soonest() {
                 label: "Session".to_string(),
                 used: 20,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(now + Duration::hours(1)),
                 window: MetricWindow::Session,
@@ -483,6 +507,8 @@ fn headline_reset_quotes_the_spent_long_windows_reset_not_the_soonest() {
                 label: "Weekly".to_string(),
                 used: 100,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(now + Duration::days(5)),
                 window: MetricWindow::Long,
@@ -508,6 +534,7 @@ fn headline_reset_falls_back_to_the_nearest_reset_when_no_spent_long_window() {
     // reset), same as before this fix.
     let now = Utc::now();
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Codex,
         status: ProviderStatus::Ok,
@@ -516,6 +543,8 @@ fn headline_reset_falls_back_to_the_nearest_reset_when_no_spent_long_window() {
                 label: "Session".to_string(),
                 used: 40,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(now + Duration::hours(1)),
                 window: MetricWindow::Session,
@@ -524,6 +553,8 @@ fn headline_reset_falls_back_to_the_nearest_reset_when_no_spent_long_window() {
                 label: "Weekly".to_string(),
                 used: 60,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(now + Duration::days(5)),
                 window: MetricWindow::Long,
@@ -544,6 +575,7 @@ fn live_data_survives_a_wall_clock_jump() {
     // It must NOT grey and must NOT fabricate an estimate — the staleness gate
     // is monotonic for live data.
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -551,6 +583,8 @@ fn live_data_survives_a_wall_clock_jump() {
             label: "Session".to_string(),
             used: 50,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at: Some(Utc::now() + Duration::hours(2)),
             window: MetricWindow::Session,
@@ -571,6 +605,7 @@ fn data_without_monotonic_anchor_uses_wall_age() {
     // A statusline snapshot / disk-cache entry (received_at None) is staled by
     // its own wall-clock age: a fresh snapshot is live, an old one is stale.
     let mk = |age_secs: i64| ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Codex,
         status: ProviderStatus::Ok,
@@ -589,6 +624,7 @@ fn marginally_past_reset_within_grace_is_not_extrapolated() {
     // could be a wall-clock skew rather than a real rollover. It must NOT become
     // an ≈0% estimate; the value is preserved (the renderer greys it instead).
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -596,6 +632,8 @@ fn marginally_past_reset_within_grace_is_not_extrapolated() {
             label: "Session".to_string(),
             used: 95,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at: Some(Utc::now() - Duration::seconds(30)),
             window: MetricWindow::Session,
@@ -620,6 +658,7 @@ fn next_reset_skips_past_timestamps() {
 
     let future = Utc::now() + Duration::hours(3);
     let data = ProviderData {
+        account_key: None,
         plan_type: None,
         id: ProviderId::Claude,
         status: ProviderStatus::Ok,
@@ -629,6 +668,8 @@ fn next_reset_skips_past_timestamps() {
                 label: "Session".to_string(),
                 used: 80,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(Utc::now() - Duration::minutes(5)),
                 window: MetricWindow::Session,
@@ -637,6 +678,8 @@ fn next_reset_skips_past_timestamps() {
                 label: "Weekly".to_string(),
                 used: 30,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: Some(future),
                 window: MetricWindow::Session,
@@ -652,6 +695,8 @@ fn next_reset_skips_past_timestamps() {
             label: "Session".to_string(),
             used: 80,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at: Some(Utc::now() - Duration::minutes(5)),
             window: MetricWindow::Session,

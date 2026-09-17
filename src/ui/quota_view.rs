@@ -20,62 +20,6 @@ pub(crate) fn selected(providers: &[ProviderData], style: &Appearance) -> Vec<We
         .collect()
 }
 
-/// The panel and tray deliberately use the same content, order and line breaks.
-/// Pro's weekly-only tooltip does not change the indicator's selected metrics.
-pub(crate) fn hover_tooltip(providers: &[ProviderData], style: &Appearance) -> String {
-    use crate::i18n::t;
-    let now = chrono::Utc::now();
-    let mut lines = vec!["Codex".to_string()];
-    let quotas = if providers.iter().any(ProviderData::is_codex_pro) {
-        vec![WeeklyQuota::for_window(providers, MetricWindow::Long)]
-    } else {
-        selected(providers, style)
-    };
-    for q in quotas {
-        let name = if q.window == MetricWindow::Session {
-            "5h"
-        } else {
-            "Weekly"
-        };
-        let reset = q
-            .reset_at
-            .map(|time| {
-                let minutes = (time - now).num_minutes().max(0);
-                let duration = if minutes >= 1440 {
-                    format!("{}d {}h", minutes / 1440, minutes % 1440 / 60)
-                } else if minutes >= 60 {
-                    format!("{}h {}m", minutes / 60, minutes % 60)
-                } else {
-                    format!("{minutes}m")
-                };
-                format!("{} {duration}", t("Reset in"))
-            })
-            .unwrap_or_else(|| t("Reset time unavailable").into());
-        lines.push(format!(
-            "{}  {} · {}",
-            t(name),
-            q.label(),
-            if q.muted() {
-                t(q.status).to_string()
-            } else {
-                reset
-            }
-        ));
-    }
-    if let Some(data) = providers
-        .iter()
-        .find(|p| p.id == crate::providers::ProviderId::Codex)
-    {
-        let age = (now - data.updated_at).num_minutes().max(0);
-        lines.push(if age == 0 {
-            t("Updated just now").into()
-        } else {
-            format!("{} {age}m", t("Updated"))
-        });
-    }
-    lines.join("\n")
-}
-
 /// Dedicated notification-area artwork. Never scales the taskbar composition.
 pub(crate) fn render_tray_icon(
     side: u32,
@@ -454,86 +398,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pro_and_prolite_tooltips_keep_only_weekly_including_cached_snapshots() {
-        use crate::providers::codex::parse_wham_snapshot;
-        for plan in ["pro", "prolite"] {
-            // Actual response shape: weekly is primary, no session window.
-            let body = format!(
-                r#"{{"plan_type":"{plan}","rate_limit":{{"primary_window":{{"limit_window_seconds":604800,"used_percent":60}},"secondary_window":null}}}}"#
-            );
-            let (metrics, plan_type) = parse_wham_snapshot(&body).unwrap();
-            let mut live = super::super::weekly::tests::data(0);
-            live.metrics = metrics;
-            live.plan_type = plan_type;
-            let cached: ProviderData =
-                serde_json::from_str(&serde_json::to_string(&live).unwrap()).unwrap();
-            for data in [live, cached.aged_for_display()] {
-                for periods in [
-                    QuotaPeriods::Weekly,
-                    QuotaPeriods::FiveHours,
-                    QuotaPeriods::Both,
-                ] {
-                    let style = Appearance {
-                        periods,
-                        ..Default::default()
-                    };
-                    let providers = [data.clone()];
-                    let before = selected(&providers, &style);
-                    let tip = hover_tooltip(&providers, &style);
-                    assert_eq!(tip.lines().count(), 3);
-                    assert!(tip.contains("40 %"));
-                    assert!(
-                        !tip.contains("5h") && !tip.contains("5-hour") && !tip.contains("5 小时")
-                    );
-                    assert_eq!(super::super::tray::tooltip(&providers, &style), tip);
-                    assert_eq!(selected(&providers, &style), before);
-                }
-                let mut missing = data;
-                missing.metrics.clear();
-                let tip = hover_tooltip(&[missing], &Appearance::default());
-                assert!(tip.contains('—'));
-                assert!(!tip.contains("5h"));
-            }
-        }
-    }
-
-    #[test]
-    fn hover_summary_respects_the_selected_period_and_does_not_guess_a_plan() {
-        for plan in [
-            None,
-            Some("plus"),
-            Some("team"),
-            Some("unknown"),
-            Some("pro_future"),
-        ] {
-            let mut data = super::super::weekly::tests::data(32);
-            data.plan_type = plan.map(str::to_owned);
-            for periods in [
-                QuotaPeriods::Weekly,
-                QuotaPeriods::FiveHours,
-                QuotaPeriods::Both,
-            ] {
-                let style = Appearance {
-                    periods,
-                    ..Default::default()
-                };
-                let tip = hover_tooltip(std::slice::from_ref(&data), &style);
-                assert_eq!(
-                    super::super::tray::tooltip(std::slice::from_ref(&data), &style),
-                    tip
-                );
-                assert_eq!(tip.contains("68 %"), periods != QuotaPeriods::FiveHours);
-                assert_eq!(tip.contains("1 %"), periods != QuotaPeriods::Weekly);
-                assert_eq!(
-                    tip.lines().count(),
-                    if periods == QuotaPeriods::Both { 4 } else { 3 }
-                );
-                assert!(tip.encode_utf16().count() <= 127);
-            }
-        }
-    }
-
-    #[test]
     fn tray_and_panel_keep_period_colors_and_shape_for_all_graphic_modes() {
         use crate::config::appearance::TrayDisplay;
         let blue =
@@ -672,39 +536,6 @@ mod tests {
                 }
             }
         }
-        let data = super::super::weekly::tests::data(49);
-        let tip = hover_tooltip(
-            &[data],
-            &Appearance {
-                periods: QuotaPeriods::Both,
-                ..Default::default()
-            },
-        );
-        assert_eq!(tip.lines().count(), 4);
-        assert!(tip.contains("51 %"));
-        assert!(tip.contains("1 %"));
-        assert!(
-            tip.encode_utf16().count() <= 127,
-            "shell tooltip size limit"
-        );
-    }
-
-    #[test]
-    fn dual_tooltip_uses_separate_lines_and_the_renderer_reserves_both() {
-        let style = Appearance {
-            periods: QuotaPeriods::Both,
-            ..Default::default()
-        };
-        let text = hover_tooltip(&[super::super::weekly::tests::data(32)], &style);
-        assert_eq!(text.lines().count(), 4);
-        let single_text = hover_tooltip(
-            &[super::super::weekly::tests::data(32)],
-            &Appearance::default(),
-        );
-        let single = super::super::tray::render_tooltip(&single_text, 48.0, false);
-        let dual = super::super::tray::render_tooltip(&text, 48.0, false);
-        assert!(dual.height() > single.height());
-        assert!(dual.width() < single.width() * 2);
     }
 
     #[test]
@@ -983,15 +814,6 @@ mod tests {
             }
             sheet
                 .save_png(dir.join(format!("synchronized-{light}.png")))
-                .unwrap();
-            let mut data = super::super::weekly::tests::data(60);
-            data.plan_type = Some("prolite".into());
-            data.metrics
-                .retain(|metric| metric.window == MetricWindow::Long);
-            data.metrics[0].reset_at = Some(chrono::Utc::now() + chrono::Duration::hours(51));
-            let text = hover_tooltip(&[data], &Appearance::default());
-            super::super::tray::render_tooltip(&text, 48., light)
-                .save_png(dir.join(format!("synchronized-tooltip-{light}.png")))
                 .unwrap();
         }
     }

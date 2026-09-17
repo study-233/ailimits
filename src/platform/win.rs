@@ -325,29 +325,6 @@ pub fn point_owner(x: i32, y: i32) -> isize {
     unsafe { WindowFromPoint(POINT { x, y }).0 as isize }
 }
 
-/// The system mouse-hover time in ms — how long Windows waits before showing a
-/// tray-icon tooltip on hover (SPI_GETMOUSEHOVERTIME). Defaults to 400 ms.
-pub fn mouse_hover_time_ms() -> u64 {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SystemParametersInfoW, SPI_GETMOUSEHOVERTIME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    };
-    unsafe {
-        let mut t: u32 = 0;
-        let ok = SystemParametersInfoW(
-            SPI_GETMOUSEHOVERTIME,
-            0,
-            Some(&mut t as *mut u32 as *mut core::ffi::c_void),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-        .is_ok();
-        if ok && t > 0 {
-            t as u64
-        } else {
-            400
-        }
-    }
-}
-
 /// Re-assert the panel overlay's topmost z-order WITHOUT moving, resizing,
 /// activating or repainting it. Cheap recovery for when another topmost window
 /// (the tray overflow flyout, the Start menu, a momentarily-topmost app) covers
@@ -550,76 +527,6 @@ fn foreground_covers_taskbar_monitor(target: crate::config::schema::PanelDisplay
         }
         let m = mi.rcMonitor;
         wr.left <= m.left && wr.top <= m.top && wr.right >= m.right && wr.bottom >= m.bottom
-    }
-}
-
-/// Minimal window procedure for the tooltip window — everything defaults.
-unsafe extern "system" fn tip_wndproc(
-    hwnd: windows::Win32::Foundation::HWND,
-    msg: u32,
-    wparam: windows::Win32::Foundation::WPARAM,
-    lparam: windows::Win32::Foundation::LPARAM,
-) -> windows::Win32::Foundation::LRESULT {
-    windows::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wparam, lparam)
-}
-
-/// Create a raw, click-through, layered, top-level window to host our own hover
-/// tooltip. We paint it with `present_layered` (dark, fully rounded, BORDERLESS)
-/// to match the shell's tooltip exactly — a native comctl tooltip can't, it
-/// always draws a classic theme border. WS_EX_TRANSPARENT lets the cursor fall
-/// through to the overlay beneath, so the tip never steals the hover. The tip's
-/// content/position is set on each show. Returns 0 on failure.
-pub fn create_tooltip_window() -> isize {
-    use windows::core::w;
-    use windows::Win32::Foundation::{HINSTANCE, HWND};
-    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, RegisterClassW, HMENU, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
-    };
-    unsafe {
-        let hinst = GetModuleHandleW(None).unwrap_or_default();
-        let class = w!("AiLimitsTooltip");
-        let wc = WNDCLASSW {
-            lpfnWndProc: Some(tip_wndproc),
-            hInstance: HINSTANCE(hinst.0),
-            lpszClassName: class,
-            ..Default::default()
-        };
-        // Best-effort: re-registering returns 0 (already registered), ignored.
-        RegisterClassW(&wc);
-        let Ok(hwnd) = CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-            class,
-            w!(""),
-            WS_POPUP,
-            0,
-            0,
-            10,
-            10,
-            HWND::default(),
-            HMENU::default(),
-            hinst,
-            None,
-        ) else {
-            return 0;
-        };
-        hwnd.0 as isize
-    }
-}
-
-/// Destroy a window we created ourselves (the tooltip). The OS reclaims it at
-/// process exit anyway, so this matters only if the owner is ever recreated
-/// rather than mutated — at which point the old window would linger, invisible
-/// and unowned, for the rest of the session.
-pub fn destroy_window(hwnd: isize) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
-    if hwnd == 0 {
-        return;
-    }
-    unsafe {
-        let _ = DestroyWindow(HWND(hwnd as _));
     }
 }
 

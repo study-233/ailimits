@@ -4,7 +4,7 @@
 ; Binaries are taken from target\release-min (cargo build --profile release-min).
 
 #define AppName "QuotaBar"
-#define AppVersion "0.2.0"
+#define AppVersion "0.3.0"
 #define AppExe "ailimits.exe"
 
 [Setup]
@@ -60,6 +60,8 @@ Source: "..\docs\en\*.md"; DestDir: "{app}\docs\en"; Flags: ignoreversion
 Source: "..\docs\zh-CN\*.md"; DestDir: "{app}\docs\zh-CN"; Flags: ignoreversion
 Source: "..\docs\images\quotabar-*.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
 Source: "..\docs\images\fluent-*.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
+Source: "..\docs\images\quota-popover-*.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
+Source: "..\docs\images\panel-settings-*.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
 Source: "languages\ChineseSimplified.LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [InstallDelete]

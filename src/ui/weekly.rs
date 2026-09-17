@@ -1,9 +1,5 @@
 //! Display-only Codex weekly remaining quota. Never changes provider metrics.
-#[cfg(test)]
-use crate::i18n::t;
 use crate::providers::{MetricWindow, ProviderData, ProviderId, ProviderStatus};
-#[cfg(test)]
-use chrono::Local;
 use chrono::{DateTime, Utc};
 use tiny_skia::{LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
@@ -64,31 +60,6 @@ impl WeeklyQuota {
             ),
             None => "—".to_string(),
         }
-    }
-
-    #[cfg(test)]
-    pub fn tooltip(&self) -> String {
-        let reset = self
-            .reset_at
-            .map(|time| {
-                format!(
-                    "{} {}",
-                    t("Reset:"),
-                    time.with_timezone(&Local).format("%m-%d %H:%M")
-                )
-            })
-            .unwrap_or_else(|| t("Reset time unavailable").to_string());
-        format!(
-            "{} {} · {} · {}",
-            t(if self.window == MetricWindow::Long {
-                "Codex weekly remaining"
-            } else {
-                "Codex 5-hour remaining"
-            }),
-            self.label(),
-            t(self.status),
-            reset
-        )
     }
 
     pub fn muted(&self) -> bool {
@@ -185,6 +156,7 @@ pub(crate) mod tests {
 
     pub(crate) fn data(used: u64) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: ProviderId::Codex,
             status: ProviderStatus::Ok,
@@ -193,6 +165,8 @@ pub(crate) mod tests {
                     label: "Weekly (misleading label)".into(),
                     used: 99,
                     limit: Some(100),
+                    observed_at: None,
+                    window_seconds: None,
                     unit: MetricUnit::Percent,
                     reset_at: None,
                     window: MetricWindow::Session,
@@ -201,6 +175,8 @@ pub(crate) mod tests {
                     label: "Any language".into(),
                     used,
                     limit: Some(100),
+                    observed_at: None,
+                    window_seconds: None,
                     unit: MetricUnit::Percent,
                     reset_at: Some(Utc::now() + chrono::Duration::days(3)),
                     window: MetricWindow::Long,

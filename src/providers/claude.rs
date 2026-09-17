@@ -100,6 +100,8 @@ impl ClaudeProvider {
                 label: "Requests".to_string(),
                 used: limit.saturating_sub(remaining),
                 limit: Some(limit),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Requests,
                 reset_at: header_datetime(&resp, HEADER_REQUESTS_RESET),
                 window: MetricWindow::Session,
@@ -114,6 +116,8 @@ impl ClaudeProvider {
                 label: "Tokens".to_string(),
                 used: limit.saturating_sub(remaining),
                 limit: Some(limit),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Tokens,
                 reset_at: header_datetime(&resp, HEADER_TOKENS_RESET),
                 window: MetricWindow::Session,
@@ -243,6 +247,7 @@ impl ClaudeProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: self.id(),
             status,
@@ -256,6 +261,7 @@ impl ClaudeProvider {
     /// Finalize statusline data: keep the snapshot time so the UI can show its age.
     fn finish_statusline(&self, parsed: StatuslineSnapshot) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: self.id(),
             status: ProviderStatus::Ok,
@@ -420,6 +426,8 @@ fn pct_metric(
         label: label.to_string(),
         used: pct.min(100),
         limit: Some(100),
+        observed_at: None,
+        window_seconds: None,
         unit: MetricUnit::Percent,
         reset_at,
         window,
@@ -500,6 +508,7 @@ impl Provider for ClaudeProvider {
     async fn fetch(&self) -> Result<ProviderData> {
         if !self.config.enabled {
             return Ok(ProviderData {
+                account_key: None,
                 plan_type: None,
                 id: self.id(),
                 status: ProviderStatus::NotConfigured,
@@ -513,6 +522,7 @@ impl Provider for ClaudeProvider {
             AuthMethod::ApiKey => match self.get_api_key() {
                 Some(key) => self.fetch_via_api_key(&key).await,
                 None => Ok(ProviderData {
+                    account_key: None,
                     plan_type: None,
                     id: self.id(),
                     status: ProviderStatus::AuthError(

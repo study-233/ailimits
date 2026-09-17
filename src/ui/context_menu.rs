@@ -21,6 +21,7 @@ pub enum MenuAction {
     ToggleLock,
     ResetPanelPosition,
     OpenAppearance,
+    OpenQuota,
     SetIndicator(IndicatorKind),
     SetPanelDisplay(PanelDisplay),
     ToggleAutoUpdate,
@@ -71,6 +72,8 @@ pub struct ContextMenu {
     reset_position_item: MenuItem,
     lock_item: CheckMenuItem,
     appearance_item: MenuItem,
+    quota_item: MenuItem,
+    pub more: Submenu,
     indicator_items: Vec<(CheckMenuItem, IndicatorKind)>,
     /// Which taskbar the mini panel attaches to. Empty on a single-display
     /// machine — see the "Only worth showing..." comment where it's built.
@@ -274,17 +277,21 @@ impl ContextMenu {
 
         let quit_item = MenuItem::new(t("Quit"), true, None);
 
+        let quota_item = MenuItem::new(t("View quota"), true, None);
+        let more = Submenu::new(t("More"), true);
+        more.append(&indicator_submenu)?;
+        more.append(&reset_position_item)?;
+        more.append(&PredefinedMenuItem::separator())?;
+        more.append(&auto_update_item)?;
+        more.append(&interval_submenu)?;
+        more.append(&PredefinedMenuItem::separator())?;
+        more.append(&providers_submenu)?;
+        more.append(&language_submenu)?;
+        more.append(&proxy_submenu)?;
+        menu.append(&quota_item)?;
         menu.append(&appearance_item)?;
         menu.append(&lock_item)?;
-        menu.append(&indicator_submenu)?;
-        menu.append(&reset_position_item)?;
-        menu.append(&PredefinedMenuItem::separator())?;
-        menu.append(&auto_update_item)?;
-        menu.append(&interval_submenu)?;
-        menu.append(&PredefinedMenuItem::separator())?;
-        menu.append(&providers_submenu)?;
-        menu.append(&language_submenu)?;
-        menu.append(&proxy_submenu)?;
+        menu.append(&more)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit_item)?;
         // Version — a disabled info line.
@@ -308,6 +315,8 @@ impl ContextMenu {
             reset_position_item,
             lock_item,
             appearance_item,
+            quota_item,
+            more,
             indicator_items,
             display_items,
             auto_update_item,
@@ -324,6 +333,9 @@ impl ContextMenu {
 
     /// Map a menu event id to an action.
     pub fn action_for(&self, event_id: &muda::MenuId) -> Option<MenuAction> {
+        if *event_id == self.quota_item.id() {
+            return Some(MenuAction::OpenQuota);
+        }
         if *event_id == self.reset_position_item.id() {
             return Some(MenuAction::ResetPanelPosition);
         }

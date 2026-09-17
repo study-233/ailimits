@@ -193,6 +193,7 @@ impl AntigravityProvider {
 
     fn data(&self, status: ProviderStatus, metrics: Vec<Metric>) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id: self.id(),
             status,
@@ -452,6 +453,8 @@ pub fn parse_quota_summary(body: &str) -> Result<Vec<Metric>> {
                 label: short_pool_label(name),
                 used: ((1.0 - frac.clamp(0.0, 1.0)) * 100.0).round() as u64,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at,
                 // These pools ARE Antigravity's general limits; it has no
@@ -518,6 +521,8 @@ pub fn parse_available_models_quota(body: &str) -> Result<Vec<Metric>> {
             label: label.clone(),
             used: ((1.0 - frac.clamp(0.0, 1.0)) * 100.0).round() as u64,
             limit: Some(100),
+            observed_at: None,
+            window_seconds: None,
             unit: MetricUnit::Percent,
             reset_at,
             window: MetricWindow::Session,

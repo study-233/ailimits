@@ -66,6 +66,10 @@ pub(crate) struct AppearanceDialog {
 struct State {
     proxy: EventLoopProxy<UserEvent>,
     draft: Appearance,
+    panel_draft: crate::config::panel::PanelConfig,
+    panel_page: bool,
+    drag: Option<usize>,
+    drop_row: Option<usize>,
     scale: f32,
     font: HFONT,
     title_font: HFONT,
@@ -260,7 +264,11 @@ unsafe fn fill(hwnd: HWND, s: &Appearance) {
 unsafe fn layout(hwnd: HWND, s: &mut State, resize: bool) {
     let _update = ControlUpdate::new(hwnd);
     publish(hwnd, s);
-    let height = if s.advanced { 788.0 } else { 548.0 };
+    let height = if s.advanced && !s.panel_page {
+        788.0
+    } else {
+        548.0
+    };
     let content = (height * s.scale).round() as i32;
     if resize {
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -319,9 +327,23 @@ unsafe fn layout(hwnd: HWND, s: &mut State, resize: bool) {
     };
     SetScrollInfo(hwnd, SB_VERT, &si, true);
     for c in &s.controls {
-        let visible = !c.advanced || s.advanced;
+        let id = GetDlgCtrlID(c.hwnd) as usize;
+        let visible = if [300, 400, 401, SAVE, CANCEL, RESET, STATUS].contains(&id) {
+            true
+        } else if id == 301 {
+            false
+        } else if (410..440).contains(&id) {
+            s.panel_page
+        } else {
+            !s.panel_page && (!c.advanced || s.advanced)
+        };
         let _ = ShowWindow(c.hwnd, if visible { SW_SHOW } else { SW_HIDE });
-        let y = c.y + if c.footer && s.advanced { 240.0 } else { 0.0 };
+        let y = c.y
+            + if c.footer && s.advanced && !s.panel_page {
+                240.0
+            } else {
+                0.0
+            };
         let _ = MoveWindow(
             c.hwnd,
             (c.x * s.scale) as i32,
@@ -358,7 +380,7 @@ unsafe fn layout(hwnd: HWND, s: &mut State, resize: bool) {
     label(
         hwnd,
         ADVANCED,
-        t(if s.advanced {
+        t(if s.advanced && !s.panel_page {
             "Hide advanced settings"
         } else {
             "Advanced settings"
@@ -383,7 +405,12 @@ unsafe fn scroll_to(hwnd: HWND, s: &mut State, requested: i32) {
     if GetClientRect(hwnd, &mut client).is_err() {
         return;
     }
-    let content = ((if s.advanced { 788.0 } else { 548.0 }) * s.scale).round() as i32;
+    let content = ((if s.advanced && !s.panel_page {
+        788.0
+    } else {
+        548.0
+    }) * s.scale)
+        .round() as i32;
     let Some(next) = scroll_destination(s.scroll, requested, content, client.bottom) else {
         return;
     };
@@ -394,11 +421,16 @@ unsafe fn scroll_to(hwnd: HWND, s: &mut State, requested: i32) {
     let controls: Vec<_> = s
         .controls
         .iter()
-        .filter(|c| !c.advanced || s.advanced)
+        .filter(|c| IsWindowVisible(c.hwnd).as_bool())
         .collect();
     let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW;
     let position = |c: &Control| {
-        let y = c.y + if c.footer && s.advanced { 240.0 } else { 0.0 };
+        let y = c.y
+            + if c.footer && s.advanced && !s.panel_page {
+                240.0
+            } else {
+                0.0
+            };
         ((c.x * s.scale) as i32, (y * s.scale) as i32 - next)
     };
     let batch = BeginDeferWindowPos(controls.len() as i32).and_then(|mut batch| {
@@ -469,9 +501,36 @@ impl AppearanceDialog {
             proxy,
         }
     }
+    #[cfg(test)]
     pub fn open(&mut self, appearance: &Appearance) -> anyhow::Result<()> {
+        self.open_settings(
+            appearance,
+            &crate::config::panel::PanelConfig::default(),
+            false,
+        )
+    }
+    pub fn open_settings(
+        &mut self,
+        appearance: &Appearance,
+        panel: &crate::config::panel::PanelConfig,
+        panel_page: bool,
+    ) -> anyhow::Result<()> {
+        self.create_settings(appearance, panel, panel_page, true)
+    }
+    fn create_settings(
+        &mut self,
+        appearance: &Appearance,
+        panel: &crate::config::panel::PanelConfig,
+        panel_page: bool,
+        present: bool,
+    ) -> anyhow::Result<()> {
         unsafe {
             if IsWindow(self.hwnd).as_bool() {
+                if let Some(mut state) = snapshot(self.hwnd) {
+                    state.panel_page = panel_page;
+                    state.scroll = 0;
+                    layout(self.hwnd, &mut state, true);
+                }
                 let _ = SetForegroundWindow(self.hwnd);
                 return Ok(());
             }
@@ -485,7 +544,7 @@ impl AppearanceDialog {
                 ..Default::default()
             };
             RegisterClassW(&class);
-            let title = wide(&format!("QuotaBar · {}", t("Appearance")));
+            let title = wide(&format!("QuotaBar · {}", t("Settings")));
             self.hwnd = CreateWindowExW(
                 WS_EX_CONTROLPARENT,
                 class.lpszClassName,
@@ -578,7 +637,7 @@ impl AppearanceDialog {
                 | WS_VSCROLL.0;
             add(
                 w!("STATIC"),
-                t("Appearance"),
+                t("Settings"),
                 300,
                 24.,
                 16.,
@@ -605,7 +664,7 @@ impl AppearanceDialog {
                 t("Display style"),
                 0,
                 24.,
-                92.,
+                212.,
                 116.,
                 24.,
                 0,
@@ -617,7 +676,7 @@ impl AppearanceDialog {
                 t("Rings"),
                 RINGS,
                 160.,
-                84.,
+                204.,
                 166.,
                 32.,
                 button,
@@ -629,7 +688,7 @@ impl AppearanceDialog {
                 t("Progress bars"),
                 BARS,
                 330.,
-                84.,
+                204.,
                 166.,
                 32.,
                 button,
@@ -641,7 +700,7 @@ impl AppearanceDialog {
                 t("Quota periods"),
                 0,
                 24.,
-                136.,
+                256.,
                 116.,
                 24.,
                 0,
@@ -658,7 +717,7 @@ impl AppearanceDialog {
                     t(title),
                     id,
                     x,
-                    128.,
+                    248.,
                     108.,
                     32.,
                     button,
@@ -675,7 +734,7 @@ impl AppearanceDialog {
                     t(title),
                     choose,
                     x,
-                    176.,
+                    296.,
                     28.,
                     28.,
                     button,
@@ -687,7 +746,7 @@ impl AppearanceDialog {
                     t(title),
                     0,
                     x + 36.,
-                    180.,
+                    300.,
                     64.,
                     24.,
                     0,
@@ -699,7 +758,7 @@ impl AppearanceDialog {
                     "",
                     field,
                     x + 108.,
-                    176.,
+                    296.,
                     120.,
                     28.,
                     edit,
@@ -712,7 +771,7 @@ impl AppearanceDialog {
                 t("Size"),
                 0,
                 24.,
-                228.,
+                348.,
                 116.,
                 24.,
                 0,
@@ -724,7 +783,7 @@ impl AppearanceDialog {
                 "",
                 SIZE,
                 300.,
-                220.,
+                340.,
                 196.,
                 160.,
                 combo,
@@ -736,7 +795,7 @@ impl AppearanceDialog {
                 t("Tray display"),
                 0,
                 24.,
-                272.,
+                392.,
                 200.,
                 24.,
                 0,
@@ -748,7 +807,7 @@ impl AppearanceDialog {
                 "",
                 TRAY,
                 300.,
-                264.,
+                384.,
                 196.,
                 160.,
                 combo,
@@ -760,7 +819,7 @@ impl AppearanceDialog {
                 t("Preview"),
                 0,
                 24.,
-                312.,
+                84.,
                 180.,
                 24.,
                 0,
@@ -772,7 +831,7 @@ impl AppearanceDialog {
                 t("Light"),
                 302,
                 24.,
-                340.,
+                112.,
                 200.,
                 20.,
                 0,
@@ -784,7 +843,7 @@ impl AppearanceDialog {
                 t("Dark"),
                 303,
                 268.,
-                340.,
+                112.,
                 200.,
                 20.,
                 0,
@@ -941,6 +1000,69 @@ impl AppearanceDialog {
                 false,
                 true,
             )?;
+            add(
+                w!("BUTTON"),
+                t("Taskbar appearance"),
+                400,
+                24.,
+                48.,
+                230.,
+                30.,
+                button,
+                false,
+                false,
+            )?;
+            add(
+                w!("BUTTON"),
+                t("Panel content"),
+                401,
+                266.,
+                48.,
+                230.,
+                30.,
+                button,
+                false,
+                false,
+            )?;
+            for i in 0..5 {
+                let y = 116. + i as f32 * 52.;
+                add(
+                    w!("BUTTON"),
+                    "",
+                    410 + i,
+                    48.,
+                    y,
+                    196.,
+                    32.,
+                    WS_TABSTOP.0 | BS_AUTOCHECKBOX as u32,
+                    false,
+                    false,
+                )?;
+                add(
+                    w!("BUTTON"),
+                    "↑",
+                    420 + i,
+                    250.,
+                    y,
+                    32.,
+                    32.,
+                    button,
+                    false,
+                    false,
+                )?;
+                add(
+                    w!("BUTTON"),
+                    "↓",
+                    430 + i,
+                    288.,
+                    y,
+                    32.,
+                    32.,
+                    button,
+                    false,
+                    false,
+                )?;
+            }
             for (id, items) in [
                 (SIZE, vec!["Compact", "Standard", "Large", "Custom"]),
                 (WEIGHT, vec!["Regular", "Semibold", "Bold"]),
@@ -973,6 +1095,10 @@ impl AppearanceDialog {
             let state = Box::new(RefCell::new(State {
                 proxy: self.proxy.clone(),
                 draft: appearance.clone(),
+                panel_draft: panel.clone(),
+                panel_page,
+                drag: None,
+                drop_row: None,
                 scale,
                 font,
                 title_font,
@@ -986,10 +1112,13 @@ impl AppearanceDialog {
             }));
             SetWindowLongPtrW(self.hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
             let mut initial = snapshot(self.hwnd).unwrap();
+            fill_panel(self.hwnd, &initial);
             layout(self.hwnd, &mut initial, true);
             ACTIVE.with(|a| a.set(self.hwnd));
-            let _ = ShowWindow(self.hwnd, SW_SHOW);
-            let _ = SetForegroundWindow(self.hwnd);
+            if present {
+                let _ = ShowWindow(self.hwnd, SW_SHOW);
+                let _ = SetForegroundWindow(self.hwnd);
+            }
             Ok(())
         }
     }
@@ -1254,7 +1383,42 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             }
             LRESULT(0)
         }
+        WM_LBUTTONDOWN if s.panel_page => {
+            let x = (lp.0 & 0xffff) as u16 as i16 as f32 / s.scale;
+            let y = (((lp.0 >> 16) & 0xffff) as u16 as i16 as f32 + s.scroll as f32) / s.scale;
+            if (18. ..44.).contains(&x) && (116. ..376.).contains(&y) {
+                s.drag = Some(((y - 116.) / 52.) as usize);
+                s.drop_row = s.drag;
+                publish(hwnd, &s);
+                windows::Win32::UI::Input::KeyboardAndMouse::SetCapture(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE if s.drag.is_some() => {
+            let y = (((lp.0 >> 16) & 0xffff) as u16 as i16 as f32 + s.scroll as f32) / s.scale;
+            s.drop_row = Some(((y - 116.) / 52.).clamp(0., 4.) as usize);
+            publish(hwnd, &s);
+            let _ = InvalidateRect(hwnd, None, false);
+            LRESULT(0)
+        }
+        WM_LBUTTONUP if s.drag.is_some() => {
+            let from = s.drag.take().unwrap();
+            let to = s.drop_row.take().unwrap_or(from);
+            s.panel_draft.move_to(from, to);
+            publish(hwnd, &s);
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+            panel_changed(hwnd, &s);
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED if s.drag.is_some() => {
+            s.drag = None;
+            s.drop_row = None;
+            publish(hwnd, &s);
+            let _ = InvalidateRect(hwnd, None, false);
+            LRESULT(0)
+        }
         WM_CLOSE => {
+            let _ = s.proxy.send_event(UserEvent::PanelCancel);
             let _ = s.proxy.send_event(UserEvent::AppearanceCancel);
             drop(s);
             let _ = DestroyWindow(hwnd);
@@ -1371,6 +1535,8 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                 return LRESULT(1);
             }
             let selected = match id {
+                400 => !s.panel_page,
+                401 => s.panel_page,
                 RINGS => s.draft.display_style == DisplayStyle::Rings,
                 BARS => s.draft.display_style == DisplayStyle::Bars,
                 WEEKLY => s.draft.periods == QuotaPeriods::Weekly,
@@ -1432,7 +1598,11 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                     rect.left = rect.right - (32. * s.scale) as i32;
                     draw_label(
                         d.hDC,
-                        if s.advanced { "⌃" } else { "›" },
+                        if s.advanced && !s.panel_page {
+                            "⌃"
+                        } else {
+                            "›"
+                        },
                         rect,
                         s.font,
                         theme.text_secondary,
@@ -1522,12 +1692,43 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
                         label(hwnd, STATUS, t("Check colors and ranges."));
                         return LRESULT(0);
                     };
+                    let _ = s
+                        .proxy
+                        .send_event(UserEvent::PanelSave(s.panel_draft.clone()));
                     let _ = s.proxy.send_event(UserEvent::AppearanceSave(draft));
                 } else {
+                    let _ = s.proxy.send_event(UserEvent::PanelCancel);
                     let _ = s.proxy.send_event(UserEvent::AppearanceCancel);
                 }
                 drop(s);
                 let _ = DestroyWindow(hwnd);
+                return LRESULT(0);
+            }
+            if [400, 401].contains(&id) {
+                s.panel_page = id == 401;
+                s.scroll = 0;
+                layout(hwnd, &mut s, true);
+                return LRESULT(0);
+            }
+            if (410..440).contains(&id) && code == BN_CLICKED {
+                if (410..415).contains(&id) {
+                    let i = id - 410;
+                    s.panel_draft.modules[i].visible = !s.panel_draft.modules[i].visible;
+                }
+                if (420..425).contains(&id) {
+                    let i = id - 420;
+                    s.panel_draft.move_to(i, i.saturating_sub(1));
+                }
+                if (430..435).contains(&id) {
+                    let i = id - 430;
+                    s.panel_draft.move_to(i, (i + 1).min(4));
+                }
+                panel_changed(hwnd, &s);
+                return LRESULT(0);
+            }
+            if id == RESET && s.panel_page {
+                s.panel_draft = crate::config::panel::PanelConfig::default();
+                panel_changed(hwnd, &s);
                 return LRESULT(0);
             }
             if id == ADVANCED {
@@ -1664,6 +1865,10 @@ unsafe fn paint_window(hwnd: HWND, dc: HDC, s: &State) {
 }
 
 unsafe fn paint(dc: HDC, s: &State) {
+    if s.panel_page {
+        paint_panel(dc, s);
+        return;
+    }
     let mut quotas = super::quota_view::selected(&[], &s.draft);
     for q in &mut quotas {
         q.remaining = Some(if q.window == crate::providers::MetricWindow::Long {
@@ -1677,9 +1882,9 @@ unsafe fn paint(dc: HDC, s: &State) {
     for (light, x) in [(true, 24.), (false, 268.)] {
         let rect = RECT {
             left: (x * s.scale) as i32,
-            top: (364. * s.scale) as i32 - s.scroll,
+            top: (136. * s.scale) as i32 - s.scroll,
             right: ((x + 228.) * s.scale) as i32,
-            bottom: (416. * s.scale) as i32 - s.scroll,
+            bottom: (188. * s.scale) as i32 - s.scroll,
         };
         let surface = SurfaceTheme::new(light).secondary;
         let brush = CreateSolidBrush(native_color(surface));
@@ -1745,8 +1950,144 @@ unsafe fn paint(dc: HDC, s: &State) {
     }
 }
 
+unsafe fn fill_panel(hwnd: HWND, s: &State) {
+    for (i, m) in s.panel_draft.modules.iter().enumerate() {
+        label(hwnd, 410 + i, t(m.id.title()));
+        if let Ok(h) = GetDlgItem(hwnd, (410 + i) as i32) {
+            SendMessageW(h, BM_SETCHECK, WPARAM(usize::from(m.visible)), LPARAM(0));
+        }
+        if let Ok(h) = GetDlgItem(hwnd, (420 + i) as i32) {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h, i > 0);
+        }
+        if let Ok(h) = GetDlgItem(hwnd, (430 + i) as i32) {
+            let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h, i < 4);
+        }
+    }
+}
+unsafe fn panel_changed(hwnd: HWND, s: &State) {
+    publish(hwnd, s);
+    fill_panel(hwnd, s);
+    let _ = s
+        .proxy
+        .send_event(UserEvent::PanelPreview(s.panel_draft.clone()));
+    let _ = RedrawWindow(hwnd, None, None, RDW_INVALIDATE | RDW_ALLCHILDREN);
+}
+unsafe fn paint_panel(dc: HDC, s: &State) {
+    let theme = SurfaceTheme::new(s.light);
+    let r = |x: f32, y: f32, w: f32, h: f32| RECT {
+        left: (x * s.scale) as i32,
+        top: (y * s.scale) as i32 - s.scroll,
+        right: ((x + w) * s.scale) as i32,
+        bottom: ((y + h) * s.scale) as i32 - s.scroll,
+    };
+    draw_label(
+        dc,
+        t("Show and arrange modules"),
+        r(24., 84., 300., 24.),
+        s.font,
+        theme.text,
+        DT_LEFT,
+    );
+    draw_label(
+        dc,
+        t("Preview"),
+        r(346., 84., 150., 24.),
+        s.caption_font,
+        theme.text_secondary,
+        DT_LEFT,
+    );
+    for i in 0..5 {
+        draw_label(
+            dc,
+            "⠿",
+            r(20., 116. + i as f32 * 52., 24., 32.),
+            s.font,
+            theme.text_secondary,
+            DT_CENTER,
+        );
+    }
+    if let Some(row) = s.drop_row {
+        fill_rounded(
+            dc,
+            r(20., 112. + row as f32 * 52., 304., 3.),
+            theme.accent,
+            1.,
+        );
+    }
+    fill_rounded(dc, r(340., 116., 156., 330.), theme.surface, 8. * s.scale);
+    draw_label(
+        dc,
+        "QuotaBar",
+        r(352., 128., 132., 26.),
+        s.font,
+        theme.text,
+        DT_LEFT,
+    );
+    let mut y = 166.;
+    for m in s.panel_draft.modules.iter().filter(|m| m.visible) {
+        draw_label(
+            dc,
+            t(m.id.title()),
+            r(352., y, 132., 24.),
+            s.caption_font,
+            theme.text,
+            DT_LEFT,
+        );
+        fill_rounded(
+            dc,
+            r(352., y + 27., 132., 4.),
+            theme.secondary,
+            2. * s.scale,
+        );
+        fill_rounded(dc, r(352., y + 27., 88., 4.), theme.accent, 2. * s.scale);
+        y += 46.;
+    }
+    if !s.panel_draft.modules.iter().any(|m| m.visible) {
+        draw_label(
+            dc,
+            t("All modules hidden"),
+            r(352., 166., 132., 30.),
+            s.caption_font,
+            theme.text_secondary,
+            DT_LEFT,
+        );
+    }
+    draw_label(
+        dc,
+        t("Settings"),
+        r(352., 416., 132., 24.),
+        s.caption_font,
+        theme.text_secondary,
+        DT_LEFT,
+    );
+    draw_label(
+        dc,
+        t("Drag the handle or use the arrows."),
+        r(24., 391., 300., 24.),
+        s.caption_font,
+        theme.text_secondary,
+        DT_LEFT,
+    );
+    draw_label(
+        dc,
+        t("Hidden modules keep their position."),
+        r(24., 419., 300., 24.),
+        s.caption_font,
+        theme.text_secondary,
+        DT_LEFT,
+    );
+    draw_label(
+        dc,
+        t("History recording continues while hidden."),
+        r(24., 447., 472., 24.),
+        s.caption_font,
+        theme.text_secondary,
+        DT_LEFT,
+    );
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use tao::{
         event::Event,
@@ -1792,7 +2133,87 @@ mod tests {
         }
     }
 
-    unsafe fn capture(hwnd: HWND, path: &std::path::Path) {
+    pub(crate) unsafe fn capture_offscreen(hwnd: HWND, path: &std::path::Path) {
+        let mut r = RECT::default();
+        GetClientRect(hwnd, &mut r).unwrap();
+        let dc = GetDC(hwnd);
+        let memory = CreateCompatibleDC(dc);
+        let bitmap = CreateCompatibleBitmap(dc, r.right, r.bottom);
+        let old = SelectObject(memory, bitmap);
+        SendMessageW(
+            hwnd,
+            WM_PRINTCLIENT,
+            WPARAM(memory.0 as usize),
+            LPARAM(PRF_CLIENT as isize),
+        );
+        unsafe extern "system" fn child_paint(child: HWND, lp: LPARAM) -> BOOL {
+            let (parent, dc) = *(lp.0 as *const (HWND, HDC));
+            if GetWindowLongW(child, GWL_STYLE) as u32 & WS_VISIBLE.0 == 0 {
+                return BOOL(1);
+            }
+            let mut origin = POINT::default();
+            let _ = ClientToScreen(child, &mut origin);
+            let _ = ScreenToClient(parent, &mut origin);
+            let saved = SaveDC(dc);
+            let _ = SetViewportOrgEx(dc, origin.x, origin.y, None);
+            SendMessageW(
+                child,
+                WM_PRINT,
+                WPARAM(dc.0 as usize),
+                LPARAM(PRF_CLIENT as isize),
+            );
+            let _ = RestoreDC(dc, saved);
+            BOOL(1)
+        }
+        let context = (hwnd, memory);
+        let _ = EnumChildWindows(
+            hwnd,
+            Some(child_paint),
+            LPARAM(&context as *const _ as isize),
+        );
+        SelectObject(memory, old);
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: r.right,
+                biHeight: -r.bottom,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bytes = vec![0u8; (r.right * r.bottom * 4) as usize];
+        assert_ne!(
+            GetDIBits(
+                memory,
+                bitmap,
+                0,
+                r.bottom as u32,
+                Some(bytes.as_mut_ptr().cast()),
+                &mut info,
+                DIB_RGB_COLORS
+            ),
+            0
+        );
+        for p in bytes.chunks_exact_mut(4) {
+            p.swap(0, 2);
+            p[3] = 255;
+        }
+        tiny_skia::Pixmap::from_vec(
+            bytes,
+            tiny_skia::IntSize::from_wh(r.right as u32, r.bottom as u32).unwrap(),
+        )
+        .unwrap()
+        .save_png(path)
+        .unwrap();
+        let _ = DeleteObject(bitmap);
+        let _ = DeleteDC(memory);
+        ReleaseDC(hwnd, dc);
+    }
+
+    pub(crate) unsafe fn capture(hwnd: HWND, path: &std::path::Path) {
         // Drain normal WM_PAINT delivery, never invalidate/repair the window.
         let mut message = MSG::default();
         while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
@@ -1806,7 +2227,30 @@ mod tests {
         let memory = CreateCompatibleDC(dc);
         let bitmap = CreateCompatibleBitmap(dc, r.right, r.bottom);
         let old = SelectObject(memory, bitmap);
-        BitBlt(memory, 0, 0, r.right, r.bottom, dc, 0, 0, SRCCOPY).unwrap();
+        let mut class = [0u16; 32];
+        let len = GetClassNameW(hwnd, &mut class);
+        if String::from_utf16_lossy(&class[..len.max(0) as usize]) == "#32768" {
+            // Native menus are composed by the shell; their window DC may
+            // expose the surface underneath. Capture their on-screen pixels.
+            let mut origin = POINT::default();
+            let _ = ClientToScreen(hwnd, &mut origin);
+            let screen = GetDC(None);
+            BitBlt(
+                memory,
+                0,
+                0,
+                r.right,
+                r.bottom,
+                screen,
+                origin.x,
+                origin.y,
+                SRCCOPY | CAPTUREBLT,
+            )
+            .unwrap();
+            ReleaseDC(None, screen);
+        } else {
+            BitBlt(memory, 0, 0, r.right, r.bottom, dc, 0, 0, SRCCOPY).unwrap();
+        }
         SelectObject(memory, old);
         let mut info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -1913,8 +2357,19 @@ mod tests {
                 )
                 .unwrap();
                 unsafe {
+                    // Keep this isolated test owner above unrelated desktop apps.
+                    // GetDC captures visible pixels, so an occluded menu is not a
+                    // meaningful rendering assertion.
+                    let _ = SetWindowPos(dialog.hwnd, HWND_TOPMOST, 40, 40, 0, 0, SWP_NOSIZE);
+                    let _ = SetForegroundWindow(dialog.hwnd);
                     let paths =
                         crate::ui::native_menu::test_menu_paths(HMENU(menu.menu.hpopupmenu() as _));
+                    assert!(
+                        paths
+                            .iter()
+                            .any(|path| path.iter().filter(|&&key| key == 0x27).count() >= 3),
+                        "the More menu must retain nested provider actions"
+                    );
                     for (case, keys) in paths.into_iter().enumerate() {
                         MENU_CASE.with(|v| v.set(case));
                         let owner = dialog.hwnd.0 as isize;
@@ -1932,8 +2387,10 @@ mod tests {
                             std::thread::sleep(std::time::Duration::from_millis(220));
                             SendMessageW(HWND(owner as _), WM_APP + 100, WPARAM(0), LPARAM(0));
                         });
-                        menu.menu
-                            .show_context_menu_for_hwnd(dialog.hwnd.0 as isize, None);
+                        menu.menu.show_context_menu_for_hwnd(
+                            dialog.hwnd.0 as isize,
+                            Some(muda::dpi::PhysicalPosition::new(80, 80).into()),
+                        );
                         worker.join().unwrap();
                         assert!(dir
                             .join(format!(
@@ -1947,6 +2404,87 @@ mod tests {
             }
         }
         crate::ui::native_menu::test_theme(None);
+    }
+
+    #[test]
+    #[ignore = "isolated hidden Win32 controls; no user config or foreground window"]
+    fn native_panel_settings_hidden_controls() {
+        let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event()
+            .with_any_thread(true)
+            .build();
+        let original = crate::config::panel::PanelConfig::default();
+        let mut dialog = AppearanceDialog::new(event_loop.create_proxy());
+        crate::i18n::set_language(crate::config::schema::Language::Chinese);
+        dialog
+            .create_settings(&Appearance::default(), &original, true, false)
+            .unwrap();
+        unsafe {
+            let h = dialog.hwnd;
+            assert!(!IsWindowVisible(h).as_bool());
+            assert_eq!(snapshot(h).unwrap().panel_draft, original);
+            SendMessageW(h, WM_COMMAND, WPARAM(410), LPARAM(0));
+            SendMessageW(h, WM_COMMAND, WPARAM(430), LPARAM(0));
+            assert_eq!(
+                snapshot(h).unwrap().panel_draft.modules[1].id,
+                crate::config::panel::ModuleId::FiveHour
+            );
+            assert!(!snapshot(h).unwrap().panel_draft.modules[1].visible);
+            let scale = snapshot(h).unwrap().scale;
+            let point = |x: f32, y: f32| {
+                LPARAM(
+                    (((y * scale) as i32 as u32) << 16 | ((x * scale) as i32 as u32 & 0xffff))
+                        as isize,
+                )
+            };
+            SendMessageW(h, WM_LBUTTONDOWN, WPARAM(1), point(28., 130.));
+            SendMessageW(h, WM_MOUSEMOVE, WPARAM(1), point(28., 336.));
+            SendMessageW(h, WM_LBUTTONUP, WPARAM(0), point(28., 336.));
+            assert_eq!(
+                snapshot(h).unwrap().panel_draft.modules[4].id,
+                crate::config::panel::ModuleId::Weekly
+            );
+            let dir = std::path::Path::new("target/quotabar-complete");
+            std::fs::create_dir_all(dir).unwrap();
+            capture_offscreen(h, &dir.join("panel-settings-zh.png"));
+            SendMessageW(h, WM_COMMAND, WPARAM(RESET), LPARAM(0));
+            assert_eq!(snapshot(h).unwrap().panel_draft, original);
+            for i in 0..5 {
+                SendMessageW(h, WM_COMMAND, WPARAM(410 + i), LPARAM(0));
+            }
+            assert!(snapshot(h)
+                .unwrap()
+                .panel_draft
+                .modules
+                .iter()
+                .all(|m| !m.visible));
+            capture_offscreen(h, &dir.join("panel-settings-hidden-zh.png"));
+            SendMessageW(h, WM_COMMAND, WPARAM(CANCEL), LPARAM(0));
+            dialog
+                .create_settings(&Appearance::default(), &original, true, false)
+                .unwrap();
+            assert_eq!(snapshot(dialog.hwnd).unwrap().panel_draft, original);
+            SendMessageW(dialog.hwnd, WM_COMMAND, WPARAM(430), LPARAM(0));
+            SendMessageW(dialog.hwnd, WM_COMMAND, WPARAM(SAVE), LPARAM(0));
+        }
+        let mut canceled = false;
+        let mut saved = None;
+        event_loop.run_return(|event, _, flow| match event {
+            tao::event::Event::UserEvent(UserEvent::PanelCancel) => canceled = true,
+            tao::event::Event::UserEvent(UserEvent::PanelSave(p)) => saved = Some(p),
+            tao::event::Event::MainEventsCleared => *flow = ControlFlow::Exit,
+            _ => {}
+        });
+        assert!(canceled);
+        let saved = saved.unwrap();
+        assert_eq!(
+            saved.modules[1].id,
+            crate::config::panel::ModuleId::FiveHour
+        );
+        assert_eq!(
+            toml::from_str::<crate::config::panel::PanelConfig>(&toml::to_string(&saved).unwrap())
+                .unwrap(),
+            saved
+        );
     }
 
     #[test]

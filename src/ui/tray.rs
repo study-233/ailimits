@@ -29,6 +29,18 @@ pub struct Tray {
 }
 
 impl Tray {
+    #[cfg(windows)]
+    pub fn anchor_rect(&self) -> Option<windows::Win32::Foundation::RECT> {
+        self.icon
+            .as_ref()?
+            .rect()
+            .map(|r| windows::Win32::Foundation::RECT {
+                left: r.position.x as i32,
+                top: r.position.y as i32,
+                right: r.position.x as i32 + r.size.width as i32,
+                bottom: r.position.y as i32 + r.size.height as i32,
+            })
+    }
     pub fn set_appearance(&mut self, mut appearance: crate::config::appearance::Appearance) {
         appearance.normalize();
         self.appearance = appearance;
@@ -80,7 +92,7 @@ impl Tray {
             }
             icon.set_menu(Some(Box::new(menu.clone())));
         } else {
-            match build_icon(menu, "QuotaBar") {
+            match build_icon(menu) {
                 Ok(icon) => {
                     if icon.set_visible(true).is_err() {
                         return false;
@@ -110,7 +122,7 @@ impl Tray {
         true
     }
 
-    /// Refresh the icon image (only when a % changed, or `force`) and tooltip.
+    /// Refresh the icon image only when its rendered state changes.
     pub fn update(&mut self, providers: &[ProviderData], theme: &ComputedTheme, force: bool) {
         let Some(icon) = self.icon.as_ref() else {
             return;
@@ -169,11 +181,6 @@ impl Tray {
                 let _ = icon.set_icon(Some(img));
             }
         }
-        let _ = icon.set_tooltip(Some(if rings {
-            super::quota_view::hover_tooltip(providers, &self.appearance)
-        } else {
-            tooltip(providers, &self.appearance)
-        }));
         // Second promotion pass once the registry keys surely exist.
         if self.promote_pending {
             self.promote_pending = false;
@@ -200,11 +207,10 @@ impl Default for Tray {
     }
 }
 
-fn build_icon(menu: &muda::Menu, tooltip: &str) -> Result<TrayIcon> {
+fn build_icon(menu: &muda::Menu) -> Result<TrayIcon> {
     TrayIconBuilder::new()
         // Right-click on the tray shows the SAME context menu as the widget.
         .with_menu(Box::new(menu.clone()))
-        .with_tooltip(tooltip)
         .with_icon(neutral_icon(crate::platform::system_uses_light_theme())?)
         .build()
         .map_err(|e| anyhow::anyhow!("tray build: {e}"))
@@ -241,29 +247,6 @@ pub(crate) fn two_busiest(providers: &[ProviderData]) -> (Option<u8>, Option<u8>
 pub(crate) fn ring_cache_state(providers: &[ProviderData]) -> Vec<Option<u8>> {
     let (first, second) = two_busiest(providers);
     vec![first, second]
-}
-
-pub(crate) fn tooltip(
-    providers: &[ProviderData],
-    style: &crate::config::appearance::Appearance,
-) -> String {
-    if providers.is_empty() {
-        return "QuotaBar".to_string();
-    }
-    providers
-        .iter()
-        .map(|d| {
-            if d.id == crate::providers::ProviderId::Codex {
-                super::quota_view::hover_tooltip(std::slice::from_ref(d), style)
-            } else {
-                match provider_pct(d) {
-                    Some(p) => format!("{} {}%", d.id.display_name(), p.round() as u32),
-                    None => format!("{} •", d.id.display_name()),
-                }
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("  ·  ")
 }
 
 /// A neutral grey dot — used as the placeholder before the first data arrives.
@@ -589,239 +572,6 @@ pub(crate) fn draw_digits_fit(
     }
 }
 
-/// Shell tooltip metrics at 100% scaling, in pixels. Windows draws its own
-/// tooltips with Segoe UI at 9pt (12px at 96 DPI), a tight box around the text,
-/// and a small corner radius — not a pill.
-///
-/// EXPERIMENTAL: the previous numbers derived everything from the taskbar
-/// height (font `bar_h * 0.30`, padding `0.85`/`0.55` of the font, radius a
-/// third of the box), which on a stock 48px bar produced a 14.4px font in a
-/// fully rounded pill — noticeably larger and rounder than anything the shell
-/// shows. These match the shell instead.
-const TIP_FONT_PX: f32 = 12.0;
-const TIP_PAD_X: f32 = 10.0;
-/// Vertically asymmetric, as the shell's is: 10 above the text, 8 below.
-const TIP_PAD_TOP: f32 = 10.0;
-const TIP_PAD_BOTTOM: f32 = 8.0;
-/// The text band the padding is measured against. Fixing it (rather than using
-/// the ink height of whatever string we happen to show) is what keeps the box
-/// 30px tall for "Claude 68%" and for a string with descenders alike — the
-/// shell's box does not breathe with its text either.
-const TIP_LINE_H: f32 = 12.0;
-/// Fitted, not guessed. Sub-pixel coverage of the shell's top-left corner gives
-/// insets of 1.71, 0.60, 0.03, -0.14 px over the first four rows; least squares
-/// over radii 2.0..5.0 puts the minimum squarely at 4.0 (error 0.018, an order
-/// of magnitude better than 3.5).
-const TIP_RADIUS: f32 = 4.0;
-/// Room reserved around the box for the drop shadow: one more than the
-/// outermost ring steps out, so it is not clipped. The shell's shadow reaches
-/// about 5px to the side (peaking at 8% darkening) and barely 2px above.
-const TIP_SHADOW: f32 = 6.0;
-/// Gap between the tooltip and the top of the taskbar. Measured at 12px; ours
-/// sat at 4 and read as glued to the bar.
-pub(crate) const TIP_GAP: i32 = 12;
-/// Very nearly opaque. Measured, not chosen: the shell's tooltip body reads
-/// grey 44 over black and grey 54 over white, so only ~10/255 of the backdrop
-/// comes through, over a true colour of grey 46. The earlier 218 was visibly
-/// more transparent than the real thing.
-///
-/// 246, not 244: 244 was fitted while the shadow still showed through the body
-/// and darkened it. With the box punched out of the shadow the body stands
-/// alone, and needs the extra two counts to land on the same measured value.
-const TIP_FILL_ALPHA: u8 = 246;
-/// The light theme's tooltip is markedly more translucent than the dark one —
-/// measured over grey 128 it reads 232 against the dark theme's 49, and over
-/// white 249. 219 reproduces both; the dark theme's near-opaque 246 came out 12
-/// counts too bright over grey.
-///
-/// Windows' light acrylic is not a plain alpha blend (black 153, grey 232,
-/// white 249 do not lie on a line), so this is fitted to the two backdrops that
-/// actually occur under a tooltip — a light taskbar and light windows — rather
-/// than to a black one, which no tooltip sits on in this theme.
-const TIP_FILL_ALPHA_LIGHT: u8 = 219;
-/// The bar height that means 100% scaling; the bar is our only DPI signal here.
-const TIP_BASE_BAR_H: f32 = 48.0;
-
-/// How far the drawn box sits inside the returned pixmap, for `bar_h`. The
-/// caller needs it to place the box (not the shadow) against the taskbar.
-pub(crate) fn tip_shadow_inset(bar_h: f32) -> i32 {
-    ((bar_h / TIP_BASE_BAR_H).clamp(0.85, 3.0) * TIP_SHADOW).round() as i32
-}
-
-/// Render the hover tooltip pixmap for the taskbar panel: the provider summary
-/// drawn by us (not a native control) so it matches the shell's own tooltip. It
-/// follows the system theme like the real Win11 tooltip: a borderless dark box
-/// in dark mode, a near-white box with a hairline border in light mode. Sized to
-/// the text; `bar_h` carries the display scaling.
-pub(crate) fn render_tooltip(text: &str, bar_h: f32, light: bool) -> Pixmap {
-    // Scale by the bar, but from the shell's own metrics rather than from a
-    // fraction of the bar. Clamped so an odd bar height cannot make the
-    // tooltip unreadable or enormous.
-    let scale = (bar_h / TIP_BASE_BAR_H).clamp(0.85, 3.0);
-    let size = TIP_FONT_PX * scale;
-    let lines: Vec<_> = text.lines().collect();
-    let tw = lines
-        .iter()
-        .map(|line| text_extent(line, size).0)
-        .fold(0.0_f32, f32::max);
-    let pad_x = (TIP_PAD_X * scale).round();
-    let pad_top = (TIP_PAD_TOP * scale).round();
-    let pad_bottom = (TIP_PAD_BOTTOM * scale).round();
-    let line_h = (TIP_LINE_H * scale).round();
-    let box_w = (tw + pad_x * 2.0).ceil().max(8.0);
-    let box_h = (line_h * lines.len().max(1) as f32 + pad_top + pad_bottom)
-        .ceil()
-        .max(8.0);
-    // The pixmap is bigger than the box: the shadow needs room around it.
-    // `TIP_SHADOW` is also the box's offset inside the pixmap, which the caller
-    // subtracts when positioning — see TaskbarPanel::show_tooltip.
-    let inset = tip_shadow_inset(bar_h) as f32;
-    let w = (box_w + inset * 2.0) as u32;
-    let h = (box_h + inset * 2.0) as u32;
-    // Centre the actual ink inside the fixed line band, so a string with no
-    // descenders does not float high in the box.
-    let mut pm = Pixmap::new(w, h).unwrap_or_else(|| Pixmap::new(1, 1).unwrap());
-    pm.fill(tiny_skia::Color::TRANSPARENT);
-    let radius = (TIP_RADIUS * scale).min(box_h / 2.0);
-
-    // Drop shadow: concentric rounded rects stepping outward, each barely
-    // visible, which approximates the shell's falloff without a blur pass.
-    // Measured over mid grey: -3,-4,-7,-10 luma at 1..4px out, nothing beyond.
-    // The alphas COMPOUND: each ring is painted over the previous one, so the
-    // cumulative darkening at distance d is 1-prod(1-a). Picked to land on the
-    // measured falloff (-3,-4,-7,-10 luma at 5..2px out over grey 128) rather
-    // than by eye; a first pass at 6/8/10/14 compounded to -15..-31, three
-    // times too heavy.
-    // The light theme casts a much softer shadow: measured -2/-4/-6 at 4..2px
-    // out against the dark theme's -4/-7/-10. Reusing the dark ramp made the
-    // light tooltip look like it was floating higher than the shell's.
-    let ramp: [(f32, u8); 5] = if light {
-        [(5.0, 1), (4.0, 2), (3.0, 3), (2.0, 4), (1.0, 6)]
-    } else {
-        [(5.0, 4), (4.0, 4), (3.0, 5), (2.0, 6), (1.0, 8)]
-    };
-    for (step, alpha) in ramp {
-        let s = step * scale;
-        fill_round_rect(
-            &mut pm,
-            inset - s,
-            inset - s + 1.0,
-            box_w + s * 2.0,
-            box_h + s * 2.0 - 1.0,
-            radius + s,
-            color(0, 0, 0, alpha),
-        );
-    }
-    // Punch the box out of the shadow before painting the body. Without this
-    // the shadow rings lie UNDER the box as well, and a body at alpha 244 lets
-    // ~4% of them through - so the body's final colour depended on the shadow's
-    // alphas, and tuning either one silently moved the other.
-    clear_round_rect(&mut pm, inset, inset, box_w, box_h, radius);
-
-    // DARK: no border at all. Scanning inward from the edge of the measured
-    // tooltip over black gives 45,44,45,45 — flat body from the first pixel.
-    // What separates it from the background is an outer shadow, which is the
-    // shell's to draw, not a lighter outline. We drew one and it was wrong.
-    //
-    // LIGHT: a hairline IS present there — a near-white body needs it — so it
-    // stays, as a 1px under-fill with the body inset into it.
-    let (body, text_ink) = if light {
-        (
-            color(249, 249, 249, TIP_FILL_ALPHA_LIGHT),
-            color(26, 26, 26, 255),
-        )
-    } else {
-        // Grey 46 is the body's true colour behind alpha 244; the measured 44
-        // over black is what that composites to.
-        (color(46, 46, 46, TIP_FILL_ALPHA), color(255, 255, 255, 255))
-    };
-    if light {
-        fill_round_rect(
-            &mut pm,
-            inset,
-            inset,
-            box_w,
-            box_h,
-            radius,
-            color(0, 0, 0, 36),
-        );
-        fill_round_rect(
-            &mut pm,
-            inset + 1.0,
-            inset + 1.0,
-            box_w - 2.0,
-            box_h - 2.0,
-            (radius - 1.0).max(0.0),
-            body,
-        );
-    } else {
-        fill_round_rect(&mut pm, inset, inset, box_w, box_h, radius, body);
-    }
-    for (i, line) in lines.iter().enumerate() {
-        let th = text_extent(line, size).1;
-        let text_y = inset + pad_top + line_h * i as f32 + (line_h - th) / 2.0;
-        draw_text_at(&mut pm, line, inset + pad_x, text_y, size, text_ink);
-    }
-    pm
-}
-
-/// Ink width/height of `text` rendered at `size` px.
-fn text_extent(text: &str, size: f32) -> (f32, f32) {
-    let Some(font) = font() else {
-        return (0.0, 0.0);
-    };
-    match digits_bounds(font, text, size) {
-        Some((_, min_x, max_x, min_y, max_y)) => (max_x - min_x, max_y - min_y),
-        None => (0.0, 0.0),
-    }
-}
-
-/// Draw `text` at `size` px with its ink top-left at (x, y) — like
-/// draw_digits_fit but with no auto-shrink and top-left (not centered) anchor.
-fn draw_text_at(pm: &mut Pixmap, text: &str, x: f32, y: f32, size: f32, c: tiny_skia::Color) {
-    let Some(font) = font() else {
-        return;
-    };
-    let Some((tl, min_x, _, min_y, _)) = digits_bounds(font, text, size) else {
-        return;
-    };
-    let (off_x, off_y) = (x - min_x, y - min_y);
-    let (cr, cg, cb) = (
-        (c.red() * 255.0) as u32,
-        (c.green() * 255.0) as u32,
-        (c.blue() * 255.0) as u32,
-    );
-    let w = pm.width() as i32;
-    let h = pm.height() as i32;
-    let data = pm.data_mut();
-    for g in tl.glyphs() {
-        let (metrics, bitmap) = font.rasterize(g);
-        for (i, &cov) in bitmap.iter().enumerate() {
-            if cov == 0 {
-                continue;
-            }
-            let px = (off_x + g.x) as i32 + (i % metrics.width) as i32;
-            let py = (off_y + g.y) as i32 + (i / metrics.width) as i32;
-            if px < 0 || py < 0 || px >= w || py >= h {
-                continue;
-            }
-            let idx = ((py * w + px) * 4) as usize;
-            // Coverage is blended LINEARLY. An earlier pass gamma-corrected it
-            // (cov^(1/2.8)) on the theory that DirectWrite does, but that was
-            // fitted against a different string than the shell was showing.
-            // Measured on the SAME string, gamma 1.0 puts the mean lit luma at
-            // 128.3 against the shell's 129.5, while 2.8 pushed it to 138 —
-            // brighter and heavier than the shell, which is what it looked like.
-            let a = cov as u32;
-            let inv = 255 - a;
-            data[idx] = ((cr * a) / 255 + data[idx] as u32 * inv / 255) as u8;
-            data[idx + 1] = ((cg * a) / 255 + data[idx + 1] as u32 * inv / 255) as u8;
-            data[idx + 2] = ((cb * a) / 255 + data[idx + 2] as u32 * inv / 255) as u8;
-            data[idx + 3] = (a + data[idx + 3] as u32 * inv / 255).min(255) as u8;
-        }
-    }
-}
-
 pub(crate) fn color(r: u8, g: u8, b: u8, a: u8) -> tiny_skia::Color {
     tiny_skia::Color::from_rgba8(r, g, b, a)
 }
@@ -830,38 +580,6 @@ fn fill_circle(pm: &mut Pixmap, cx: f32, cy: f32, r: f32, c: tiny_skia::Color) {
     let mut pb = PathBuilder::new();
     pb.push_circle(cx, cy, r);
     fill_path(pm, pb, c);
-}
-
-/// Erase a rounded rect to full transparency (BlendMode::Clear), so whatever
-/// is painted there next composites against nothing rather than against what
-/// was already drawn underneath.
-fn clear_round_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32) {
-    let r = r.min(w / 2.0).min(h / 2.0);
-    let mut pb = PathBuilder::new();
-    pb.move_to(x + r, y);
-    pb.line_to(x + w - r, y);
-    pb.quad_to(x + w, y, x + w, y + r);
-    pb.line_to(x + w, y + h - r);
-    pb.quad_to(x + w, y + h, x + w - r, y + h);
-    pb.line_to(x + r, y + h);
-    pb.quad_to(x, y + h, x, y + h - r);
-    pb.line_to(x, y + r);
-    pb.quad_to(x, y, x + r, y);
-    pb.close();
-    if let Some(path) = pb.finish() {
-        let paint = Paint {
-            blend_mode: tiny_skia::BlendMode::Clear,
-            anti_alias: true,
-            ..Default::default()
-        };
-        pm.fill_path(
-            &path,
-            &paint,
-            tiny_skia::FillRule::Winding,
-            Transform::identity(),
-            None,
-        );
-    }
 }
 
 pub(crate) fn fill_round_rect(
@@ -925,6 +643,7 @@ mod tests {
 
     fn data(id: ProviderId, pct: u64) -> ProviderData {
         ProviderData {
+            account_key: None,
             plan_type: None,
             id,
             status: ProviderStatus::Ok,
@@ -932,6 +651,8 @@ mod tests {
                 label: "Session".into(),
                 used: pct,
                 limit: Some(100),
+                observed_at: None,
+                window_seconds: None,
                 unit: MetricUnit::Percent,
                 reset_at: None,
                 window: MetricWindow::Session,
@@ -1146,72 +867,6 @@ mod tests {
             ring_cache_state(&after),
             "a change in the second ring must invalidate the cache"
         );
-    }
-
-    /// Every measurement behind the tooltip and ring constants was taken at
-    /// 100% scaling on a 48px bar. These pin what the scaling does elsewhere,
-    /// because a 150% or 200% display is the case nobody re-measures and the
-    /// one where a rounding slip turns into a visibly wrong box.
-    #[test]
-    fn tooltip_geometry_holds_at_every_scale() {
-        for (bar_h, label) in [
-            (41.0, "85% floor"),
-            (48.0, "100%"),
-            (72.0, "150%"),
-            (96.0, "200%"),
-        ] {
-            let pm = render_tooltip("Claude 68%  ·  Codex 100%", bar_h, false);
-            let inset = tip_shadow_inset(bar_h);
-            let scale = (bar_h / TIP_BASE_BAR_H).clamp(0.85, 3.0);
-
-            // The shadow must fit in the margin reserved for it, or the
-            // outermost ring is clipped and the tooltip gains a hard edge.
-            let outermost = 5.0 * scale;
-            assert!(
-                inset as f32 >= outermost,
-                "{label}: shadow reaches {outermost}px but only {inset}px is reserved"
-            );
-            // The box must still be inside the pixmap on both axes.
-            let box_h = (TIP_LINE_H * scale).round()
-                + (TIP_PAD_TOP * scale).round()
-                + (TIP_PAD_BOTTOM * scale).round();
-            assert!(
-                pm.height() as f32 >= box_h + inset as f32 * 2.0,
-                "{label}: pixmap {} too short for a {box_h}px box plus {inset}px margins",
-                pm.height()
-            );
-            // And the whole thing must grow with the bar, not jump around.
-            assert!(pm.height() > 0 && pm.width() > 0, "{label}: empty pixmap");
-        }
-    }
-
-    /// Render the tooltip with a GIVEN string, composited over mid grey, so it
-    /// can be compared pixel-for-pixel with a capture of the shell's own
-    /// tooltip showing the same text. Comparing different strings is not a
-    /// comparison: letter mix changes the mean ink and descenders change the
-    /// measured text height, which is exactly how an earlier pass concluded our
-    /// text was dimmer when the stems were in fact identical.
-    /// Run: `cargo test preview_tooltip -- --ignored`.
-    #[test]
-    #[ignore]
-    fn preview_tooltip() {
-        let text = std::env::var("TIP_TEXT")
-            .unwrap_or_else(|_| "Realtek Digital Output (Realtek USB Audio): 12%".to_string());
-        let pm = render_tooltip(&text, 48.0, false);
-        // Composite over grey 128, the backdrop the shell was measured against.
-        let mut out = Pixmap::new(pm.width(), pm.height()).unwrap();
-        out.fill(color(128, 128, 128, 255));
-        out.draw_pixmap(
-            0,
-            0,
-            pm.as_ref(),
-            &tiny_skia::PixmapPaint::default(),
-            Transform::identity(),
-            None,
-        );
-        let path = std::env::temp_dir().join("ailimits_tooltip_on_grey.png");
-        std::fs::write(&path, out.encode_png().unwrap()).unwrap();
-        println!("{}", path.display());
     }
 
     /// Design preview for the ring icon: the tray square is far too small to

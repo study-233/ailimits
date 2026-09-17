@@ -15,7 +15,9 @@ try {
         'docs/images/quotabar-styles.png', 'docs/images/quotabar-settings-en.png', 'docs/images/quotabar-settings-zh.png',
         'docs/images/fluent-menu-zh-dark.png', 'docs/images/fluent-quota-styles.png',
         'docs/images/fluent-settings-en-dark.png', 'docs/images/fluent-settings-zh-dark.png',
-        'docs/images/fluent-settings-zh-light.png', 'docs/images/fluent-tray-dark.png')
+        'docs/images/fluent-settings-zh-light.png', 'docs/images/fluent-tray-dark.png',
+        'docs/images/quota-popover-zh-dark.png', 'docs/images/quota-popover-en-light.png',
+        'docs/images/panel-settings-zh.png')
     foreach ($file in $files) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing package input: $file" }
     }

@@ -41,7 +41,7 @@ All progress means **remaining** quota. Dual views have a fixed order: 5 hours t
 
 The tray follows the taskbar's selected shape, periods and period colors, with geometry adapted to 16/20/24/32-pixel icons. `ring` ("Follow style") draws the selected ring or bar; `auto` and `ring_state` ("Style + state") also show a corner marker for low or unavailable/stale quota. Dual views retain both periods. Explicit `number` mode uses the most constrained known selected period and shares the taskbar's numeric color and font weight; it omits the percent sign and pads values below 10 with a zero. Warning colors use the Codex provider's existing used-quota `alert_threshold` (80 means a warning at 20% remaining); stale/estimated data stays muted. Automatic number colors progress from amber to red below that threshold; explicit custom number colors remain respected.
 
-Taskbar and tray hover tips share the same summary, line breaks, selected periods, reset countdown and update age. Explicit Codex `pro` and `prolite` plan values show only weekly quota in both tips, even when 5 hours is selected; missing weekly quota remains unavailable. This rule does not change the indicator graphics or underlying quota data. Unknown plans follow the selected periods.
+Left-click the taskbar or tray entry for quota details. All plans use the independent five-module popup layout; missing data remains unavailable. Hover tooltips are removed. Click again, click outside or press Esc to close; dragging does not open details. Language, proxy, providers and refresh interval are in the More menu.
 
 Settings and menus follow **AppsUseLightTheme**, while taskbar/tray ink follows **SystemUsesLightTheme**, including Windows mixed-theme configurations.
 
@@ -68,7 +68,7 @@ Authentication uses the same configuration and proxy selection:
 .\ailimits-auth.exe remove-usage-token codex
 ```
 
-Secret input is hidden and stored in Windows Credential Manager. Manual usage tokens are validated before saving. Official CLI tokens are read without being refreshed or rotated by QuotaBar.
+Secret input is hidden and stored in Windows Credential Manager. Manual usage tokens are validated before saving. Base quota requests do not refresh or rotate official CLI tokens. Optional extension reads run the official CLI, which manages its own authentication.
 
 ## Legacy reference
 
@@ -244,3 +244,29 @@ in the Windows Credential Manager under service `ailimits`:
 
 The Rust structs live in `src/config/schema.rs` — that file is the single
 source of truth for the schema.
+
+
+## Independent popup modules
+
+Settings has **Taskbar appearance** and **Panel content** pages. Check each module, drag its handle or use the up/down buttons; the preview follows immediately. Save commits, Cancel/close rolls back, and Restore defaults resets the current page. Hidden rows retain their slots; hiding everything leaves Settings accessible. The module array order is the display order:
+
+```toml
+[panel]
+modules = [
+  { id = "five_hour", visible = true },
+  { id = "weekly", visible = true },
+  { id = "reset_credits", visible = true },
+  { id = "quota_history", visible = true },
+  { id = "token_activity", visible = true },
+]
+```
+
+Missing sections/modules receive defaults; unknown IDs are ignored and duplicates keep their first entry. Taskbar position and appearance remain separate. Pace compares remaining quota with `(reset-now)/window duration`, bounded to 0–100%; cached, estimated or incomplete observations have no pace verdict. The Codex alert threshold controls low-quota coloring.
+
+Optional extensions use the local official Codex App Server's `account/rateLimits/read` and `account/usage/read`, described in the [official protocol](https://learn.chatgpt.com/docs/app-server). Opening refreshes only enabled extension modules whose cache is older than five minutes. Manual refresh includes the existing base quota scheduler. Duplicate reads coalesce. The helper honors `CODEX_HOME` (default `~/.codex`), uses file credentials, checks identity before and after reading, and never merges an unconfirmed account. No model turn, login or reset-credit consumption is requested. The official CLI manages its own authentication.
+
+A hidden, suspended helper is attached to a Windows job before it can spawn descendants. It has a 25-second read deadline; closing the job kills the entire owned tree and the parent is reaped. Missing Codex, unsupported methods, null fields, zero available credits and count-only credits are distinct states.
+
+`%APPDATA%/AiLimits/quota-history.json` retains 30 days, partitioned by opaque SHA-256 account keys without tokens or email addresses. Quota observations append on changes and at 15-minute anchors, including while hidden; daily compaction removes old data. Token buckets replace their date rather than increment it. Gaps over `max(2 × refresh interval, 30 minutes)` and reset boundaries break quota lines. No pre-installation quota history is fabricated. Missing Token days differ from genuine zero; totals include only known dates.
+
+Click either chart to open a native detail window (quota: current cycle/7/30 days; Tokens: 7/30 days). Hovering samples displays dates and values in the window footer. Graph bitmaps are cached until data, size, theme, language or date changes. Closing the popup stops its UI timer.

@@ -2,6 +2,26 @@
 
 Notable, user-visible changes. Dates are release dates.
 
+## 0.3.0 - 2026-09-17
+
+### 中文
+
+- 新增完整原生配额面板：5 小时额度、每周额度、重置机会、额度历史及近 30 天 Token 活动，保留 Windows 明暗主题和轻量绘制。
+- 面板内容与任务栏外观独立设置；支持模块显隐、拖动及上下按钮排序、实时预览、恢复默认、保存和取消，兼容旧配置。
+- 额度模块补齐时间剩余、使用节奏、重置倒计时和本地重置时间；缓存或不完整数据不参与节奏判断。
+- 按账号保存最近 30 天真实额度观测；图表支持独立详情窗口，区分采样空白、重置周期、缺失日期和零用量。
+- 按需通过本机 Codex App Server 获取重置机会和每日 Token 数据，校验账号、合并请求并缓存五分钟；读取结束或超时后清理辅助进程。
+- 扩展接口不可用、字段缺失或账号无法匹配时明确显示状态；不会补造历史，也不会使用重置机会。
+- 移除任务栏和托盘悬停提示；更新中英文操作说明，并将新面板截图随安装包和便携包提供。
+
+### English
+
+- Added a native quota panel with five configurable modules: 5-hour quota, weekly quota, reset opportunities, quota history and daily token activity.
+- Panel visibility and ordering are independent of taskbar appearance, with drag/button reordering, live preview, defaults, Save/Cancel and compatible configuration migration.
+- Added time remaining, usage pace and local reset times, account-isolated 30-day observations, and native chart detail windows with explicit data gaps.
+- Reads optional Codex App Server data on demand with account verification, five-minute caching, request coalescing, timeouts and helper-process cleanup. Unsupported or missing data remains clearly unavailable.
+- Removed taskbar/tray hover tooltips and bundled updated bilingual documentation and panel screenshots. Existing installation identity and settings are preserved during upgrades.
+
 ## 0.2.0 — QuotaBar
 
 - 原生 Fluent 设置与菜单统一明暗主题；修复初始绘制、子菜单和滚动重绘问题。
