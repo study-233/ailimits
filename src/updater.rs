@@ -18,14 +18,11 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// GitHub repository that publishes releases.
-const REPO: &str = "napxlexn/ailimits";
+const REPO: &str = "study-233/ailimits";
 /// Delay before the first check so startup stays snappy.
 const INITIAL_DELAY: Duration = Duration::from_secs(30);
 /// Interval between checks.
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
-/// HTTP timeout — generous enough to download the installer (~4 MB).
-const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
-
 /// A newer release with a hash-verifiable Windows installer asset.
 struct Update {
     version: String,
@@ -38,16 +35,9 @@ struct Update {
 /// upgrade never returns here.
 pub async fn run(enabled: Arc<AtomicBool>) {
     tokio::time::sleep(INITIAL_DELAY).await;
-    let client = match build_client() {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("auto-update disabled: {e:#}");
-            return;
-        }
-    };
     loop {
         if enabled.load(Ordering::Relaxed) {
-            if let Err(e) = check_and_install(&client).await {
+            if let Err(e) = check_and_install().await {
                 // A failed check is non-fatal: log and try again next cycle.
                 debug!("auto-update check skipped: {e:#}");
             }
@@ -56,16 +46,10 @@ pub async fn run(enabled: Arc<AtomicBool>) {
     }
 }
 
-fn build_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .user_agent(concat!("ailimits/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("build updater HTTP client")
-}
-
-async fn check_and_install(client: &reqwest::Client) -> Result<()> {
-    let Some(update) = fetch_latest(client).await? else {
+async fn check_and_install() -> Result<()> {
+    let Some(update) =
+        fetch_latest(&crate::network::client(crate::network::Profile::Updater)?).await?
+    else {
         return Ok(());
     };
     info!(
@@ -92,7 +76,11 @@ async fn check_and_install(client: &reqwest::Client) -> Result<()> {
         );
         return Ok(());
     }
-    let installer = download_and_verify(client, &update).await?;
+    let installer = download_and_verify(
+        &crate::network::client(crate::network::Profile::Updater)?,
+        &update,
+    )
+    .await?;
     info!("update verified; launching installer for a silent upgrade");
     // Diverges on success: the installer replaces this process. A failed
     // handoff must NOT take the app down — stay on the current version.
@@ -106,15 +94,23 @@ async fn check_and_install(client: &reqwest::Client) -> Result<()> {
 /// running build AND carries a `.exe` asset with a usable sha256 digest.
 async fn fetch_latest(client: &reqwest::Client) -> Result<Option<Update>> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let body: serde_json::Value = client
-        .get(&url)
+    fetch_latest_at(client, &url).await
+}
+
+async fn fetch_latest_at(client: &reqwest::Client, url: &str) -> Result<Option<Update>> {
+    let response = client
+        .get(url)
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let body = response.error_for_status()?.json().await?;
+    parse_release(&body)
+}
 
+fn parse_release(body: &serde_json::Value) -> Result<Option<Update>> {
     let tag = body
         .get("tag_name")
         .and_then(|v| v.as_str())
@@ -167,19 +163,21 @@ async fn download_and_verify(client: &reqwest::Client, update: &Update) -> Resul
         .bytes()
         .await?;
 
-    let actual = hex_lower(digest(&SHA256, &bytes).as_ref());
-    if !actual.eq_ignore_ascii_case(&update.sha256) {
-        bail!(
-            "installer sha256 mismatch (expected {}, got {actual}) — aborting",
-            update.sha256
-        );
-    }
+    verify_digest(&bytes, &update.sha256)?;
 
     let dest = std::env::temp_dir().join(format!("AiLimits-Setup-{}.exe", update.version));
     tokio::fs::write(&dest, &bytes)
         .await
         .with_context(|| format!("write installer to {}", dest.display()))?;
     Ok(dest)
+}
+
+fn verify_digest(bytes: &[u8], expected: &str) -> Result<()> {
+    let actual = hex_lower(digest(&SHA256, bytes).as_ref());
+    if !actual.eq_ignore_ascii_case(expected) {
+        bail!("installer sha256 mismatch (expected {expected}, got {actual}) — aborting");
+    }
+    Ok(())
 }
 
 /// Where the STANDARD install puts the exe: `{localappdata}\AiLimits\ailimits.exe`
@@ -360,6 +358,61 @@ fn hex_lower(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fork_release_metadata_requires_a_new_version_and_digest() {
+        assert_eq!(REPO, "study-233/ailimits");
+        let mut release = serde_json::json!({
+            "tag_name": "v999.0.0",
+            "assets": [{"name": "AiLimits-Setup.exe", "browser_download_url": "https://example.invalid/setup.exe", "digest": format!("sha256:{}", "ab".repeat(32))}]
+        });
+        let update = parse_release(&release).unwrap().unwrap();
+        assert_eq!(update.version, "999.0.0");
+        assert_eq!(update.sha256, "ab".repeat(32));
+        release["assets"][0]["digest"] = serde_json::Value::Null;
+        assert!(parse_release(&release).is_err());
+        release["tag_name"] = env!("CARGO_PKG_VERSION").into();
+        assert!(parse_release(&release).unwrap().is_none());
+    }
+
+    #[test]
+    fn installer_digest_accepts_only_matching_bytes() {
+        let bytes = b"synthetic installer payload, never executed";
+        let hash = hex_lower(digest(&SHA256, bytes).as_ref());
+        assert!(verify_digest(bytes, &hash).is_ok());
+        assert!(verify_digest(bytes, &hash.to_uppercase()).is_ok());
+        assert!(verify_digest(b"tampered", &hash).is_err());
+        assert!(verify_digest(bytes, "").is_err());
+    }
+
+    #[test]
+    fn no_release_is_a_normal_skip() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut buffer = [0; 2048];
+            let _ = stream.read(&mut buffer);
+            stream
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .unwrap();
+            assert!(fetch_latest_at(&client, &url).await.unwrap().is_none());
+        });
+        server.join().unwrap();
+    }
 
     #[test]
     fn parses_tags_with_and_without_prefix() {

@@ -21,19 +21,11 @@ const USAGE_TOKEN_LABEL: &str = "codex_usage_token";
 
 pub struct CodexProvider {
     config: ProviderConfig,
-    http: reqwest::Client,
 }
 
 impl CodexProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            // Never follow a 3xx — keeps the bearer token from leaking to a
-            // redirected host. These endpoints return 200 directly.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("Failed to build HTTP client");
-        Self { config, http }
+        Self { config }
     }
 
     /// Manual usage token; tried before the Codex CLI token.
@@ -83,7 +75,7 @@ impl CodexProvider {
         match self.fetch_usage(&token).await {
             Ok(Some(data)) => Ok(data),
             Ok(None) => Ok(self.data(
-                ProviderStatus::AuthError("token expired — run Codex CLI once".to_string()),
+                ProviderStatus::AuthError("token expired".to_string()),
                 vec![],
             )),
             Err(e) => Ok(self.data(ProviderStatus::NetworkError(e.to_string()), vec![])),
@@ -92,8 +84,7 @@ impl CodexProvider {
 
     /// One usage request. Ok(None) = the token was rejected (401/403).
     async fn fetch_usage(&self, token: &str) -> Result<Option<ProviderData>> {
-        let resp = self
-            .http
+        let resp = crate::network::client(crate::network::Profile::Provider)?
             .get(WHAM_USAGE_URL)
             .bearer_auth(token)
             .header("User-Agent", "ailimits-widget")
@@ -164,7 +155,7 @@ async fn read_codex_token() -> Result<Option<String>> {
 /// Schema verified by a manual request on 2026-06-10 (plus plan):
 /// {"rate_limit": {"primary_window": {"used_percent": 1, "reset_at": 1781121633, ...},
 ///  "secondary_window": {"used_percent": 28, ...}}, "plan_type": "plus", ...}
-/// primary = the 5-hour session, secondary = the week. The parser is tolerant.
+/// Window positions vary by account. Duration is authoritative when supplied.
 pub fn parse_wham_usage(body: &str) -> Result<Vec<Metric>> {
     let value: serde_json::Value = serde_json::from_str(body)?;
     let rate_limit = match value.get("rate_limit") {
@@ -177,6 +168,16 @@ pub fn parse_wham_usage(body: &str) -> Result<Vec<Metric>> {
         let field = match rate_limit.get(key) {
             Some(w) if w.is_object() => w,
             _ => return,
+        };
+        let (label, window) = match field.get("limit_window_seconds") {
+            Some(value) => match value.as_u64() {
+                Some(604800) => ("Weekly", MetricWindow::Long),
+                Some(18000) => ("Session", MetricWindow::Session),
+                // Do not assign an explicit but unknown/malformed duration a
+                // familiar quota window merely because of its object position.
+                _ => return,
+            },
+            None => (label, window), // Older responses omitted duration.
         };
         let pct = field
             .get("used_percent")

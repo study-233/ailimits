@@ -1,14 +1,14 @@
 [package]
 name = "ailimits"
-version = "0.6.4"
+version = "0.1.0"
 edition = "2021"
 # Build-from-source floor. Driven by icu_* (via reqwest → url → idna); Cargo
 # emits a clear error on an older toolchain instead of a deep dependency error.
 rust-version = "1.86"
-description = "AI provider limits floating overlay widget for Windows 11"
-authors = ["napxlexn"]
+description = "Codex weekly remaining quota taskbar panel for Windows 11 (study-233 fork)"
+authors = ["napxlexn", "study-233"]
 license = "GPL-3.0-or-later"
-repository = "https://github.com/napxlexn/ailimits"
+repository = "https://github.com/study-233/ailimits"
 # The console window is hidden via #![windows_subsystem = "windows"] in main.rs.
 
 [[bin]]
@@ -34,7 +34,6 @@ muda = "0.15"
 # System tray icon (same tauri ecosystem as muda/tao — minimal added weight).
 tray-icon = "0.19"
 # CPU rendering into the window.
-softbuffer = "0.4"
 # 2D vector graphics.
 tiny-skia = "0.11"
 # Text rendering.
@@ -46,7 +45,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "time", "fs", "process",
 
 # --- HTTP ---
 # HTTP client with TLS (rustls, no OpenSSL).
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "system-proxy", "socks"], default-features = false }
 # SHA-256 for the auto-updater's installer integrity check. Already in the tree
 # via rustls (transitively) — a direct dep here adds no new crate, only access.
 ring = "0.17"
@@ -102,6 +101,11 @@ windows-sys = { version = "0.59.0", features = [
 tauri-winrt-notification = "0.8"
 # Win32 API.
 windows = { version = "0.58", features = [
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_HiDpi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Com",
+    "Win32_Globalization",
     # DWM: DWMWA_WINDOW_CORNER_PREFERENCE for rounded corners.
     "Win32_Graphics_Dwm",
     "Win32_UI_WindowsAndMessaging",

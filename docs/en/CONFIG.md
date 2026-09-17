@@ -1,3 +1,25 @@
+## Fork taskbar appearance
+
+Desktop widget options are legacy and ignored in this fork. `general.panel_locked` locks both dragging and automatic positioning; old `window.locked` migrates when the new field is absent. `general.panel_position_x` is the taskbar-relative horizontal DIP coordinate. Off migrates to the panel and legacy Bars to the weekly tray ring.
+
+`[appearance]` defaults:
+
+```toml
+ring_color = "#FF3774"
+number_color = "auto" # or #RRGGBB
+ring_size = 28 # 12–44 DIP
+ring_thickness = 4 # 1–12, less than half the diameter
+ring_x = 8 # 0–300 DIP from panel left
+ring_y = 0 # −20–20 DIP from centered position
+number_size = 20 # 10–40 DIP ink height
+number_x = 43 # 0–300 DIP from panel left
+number_y = 0 # −20–20 DIP from centered position
+number_weight = "semibold" # regular / semibold / bold
+symbol_percent = 60 # 40–100, relative to digit size
+```
+
+Right-click Appearance settings for live preview; Save persists, Cancel/close rolls back. Vertical offsets stay inside the taskbar. Outdated/missing data retains muted state styling. The tray uses the same ring hue and relative thickness within the system-controlled icon size. The following upstream widget options are retained only for configuration compatibility.
+
 # CONFIG.md — the configuration file
 
 Location: `%APPDATA%\AiLimits\config.toml`. Created automatically on the
@@ -12,23 +34,38 @@ Expanded sparkline) and, when `AILIMITS_LOG` or `RUST_LOG` is set,
 
 ## Full example
 
+This fork also supports `[network] proxy_mode = "system"` (default) or
+`"direct"`. The Network proxy menu applies changes to the next request.
+System mode follows reqwest's environment/Windows static-proxy rules;
+PAC/WPAD is not supported. System setting changes are detected automatically;
+environment changes outside the running process require a restart.
+
 ```toml
 [general]
+# Language: "auto" follows Windows display language (Chinese → zh-CN,
+# otherwise English); "zh-CN" / "en" explicitly select a language.
+language = "auto"
 # Update interval in seconds (menu: 60 / 300 / 900 / 1800; hard minimum 60).
 # Polling pauses while idle/locked and backs off when a whole cycle fails;
 # Claude's endpoint is also rate-limited server-side, so its refresh can
 # occasionally take 2–3 minutes regardless of this setting.
 update_interval_secs = 60
-# Taskbar indicator (menu: Indicator): "tray" — a 16px tray icon, two
-# concentric rings carrying the two busiest providers, monochrome in the
-# system taskbar theme; "panel_rows" / "panel_grid" (legacy alias) — a transparent
-# overlay left of the tray: a per-pixel-alpha layered window, only digits
-# and bars are painted. Shows the first two providers in the widget's order
-# (percent + bar, clock-sized), monochrome, following the SYSTEM light/dark
-# theme; the rest stay in the tooltip. Tracks the taskbar's auto-hide and
-# tray width event-driven, no polling. "bars" — legacy tray icon;
-# "off" — nothing. Supersedes the legacy show_tray_icon flag (ignored).
-indicator = "tray"
+# Desktop widget is opt-in; tray/panel clicks do not open it while disabled.
+show_widget = false
+# Taskbar indicator: panel_rows (default) / panel_grid (legacy alias) display
+# a single Codex WEEKLY REMAINING ring with an adjacent percentage.
+# No weekly metric => a track and dash; old data is grey, estimates use ≈.
+# Follows taskbar theme, DPI and auto-hide; tray mode is selected manually.
+# tray uses the same Codex weekly remaining ring; bars is a legacy usage view.
+# Panel placement checks actual shell controls via background UI Automation.
+# Prefers free space before the tray, then before the app buttons. When space
+# is insufficient or detection fails, retains its previous position and size.
+# Drag the ring or digits horizontally to persist a manual position (DIP).
+# Manual positions may overlap other buttons; use Restore automatic position
+# to clear this optional value.
+# panel_position_x = 420
+# off is only allowed while the desktop widget is enabled.
+indicator = "panel_rows"
 # Automatic updates (menu: Automatic updates). When true, AI Limits checks
 # GitHub for a newer release in the background (~30s after start, then daily),
 # verifies the installer against the release's published SHA-256, installs it

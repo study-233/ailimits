@@ -74,7 +74,23 @@ pub async fn load_or_default() -> Result<Config> {
         }
     }
 
+    migrate_taskbar_preferences(&mut config, &content);
     Ok(config)
+}
+
+/// Preserve explicit taskbar preferences while accepting older widget configs.
+pub fn migrate_taskbar_preferences(config: &mut Config, content: &str) {
+    if let Ok(raw) = toml::from_str::<toml::Value>(content) {
+        if raw
+            .get("general")
+            .and_then(|v| v.get("panel_locked"))
+            .is_none()
+        {
+            config.general.panel_locked = config.window.locked;
+        }
+    }
+    config.appearance.normalize();
+    config.general.ensure_visible_entry();
 }
 
 /// Save the config to its default path.

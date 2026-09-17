@@ -3,16 +3,16 @@
 ; Build: ISCC.exe installer\ailimits.iss
 ; Binaries are taken from target\release-min (cargo build --profile release-min).
 
-#define AppName "AI Limits"
-#define AppVersion "0.6.4"
+#define AppName "AI Limits (study-233 fork)"
+#define AppVersion "0.1.0"
 #define AppExe "ailimits.exe"
 
 [Setup]
 AppId={{7A1B9C44-5E2D-4F8A-9C3B-AILIMITS0001}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=napxlexn
-AppPublisherURL=https://github.com/napxlexn/ailimits
+AppPublisher=study-233
+AppPublisherURL=https://github.com/study-233/ailimits
 LicenseFile=..\LICENSE
 DefaultDirName={localappdata}\AiLimits
 DefaultGroupName={#AppName}
@@ -47,6 +47,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 Source: "..\target\release-min\ailimits.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release-min\ailimits-auth.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\TRADEMARKS.md"; DestDir: "{app}"; Flags: ignoreversion
 

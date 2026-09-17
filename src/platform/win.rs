@@ -11,6 +11,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINF
 /// the panel floats above instead (the approach XMeters/TrafficMonitor
 /// converged on for Win11).
 pub struct TaskbarSlot {
+    pub hwnd: isize,
+    pub left: i32,
+    pub right: i32,
     /// Screen X of the tray's left edge (the panel goes left of it).
     pub tray_left: i32,
     /// Taskbar top in screen coordinates.
@@ -88,6 +91,9 @@ pub fn taskbar_slot(target: crate::config::schema::PanelDisplay) -> Option<Taskb
                 ),
             };
         Some(TaskbarSlot {
+            hwnd: taskbar.0 as isize,
+            left: bar.left,
+            right: bar.right,
             tray_left,
             top: bar.top,
             height: bar.bottom - bar.top,
@@ -743,6 +749,7 @@ pub fn install_taskbar_watch(
     proxy: tao::event_loop::EventLoopProxy<crate::app::UserEvent>,
     target: crate::config::schema::PanelDisplay,
 ) {
+    super::taskbar_space::start(proxy.clone());
     use std::sync::Mutex;
     use std::sync::OnceLock;
     use windows::core::w;

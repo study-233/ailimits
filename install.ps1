@@ -1,6 +1,6 @@
 # AI Limits terminal installer.
 #
-#   irm https://raw.githubusercontent.com/napxlexn/ailimits/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/study-233/ailimits/master/install.ps1 | iex
 #
 # Downloads the latest release installer, verifies its SHA-256 against the
 # digest GitHub publishes for the asset, and runs a silent per-user install
@@ -8,7 +8,7 @@
 # enforces: no digest, or a mismatch, means no install.
 $ErrorActionPreference = 'Stop'
 
-$release = Invoke-RestMethod 'https://api.github.com/repos/napxlexn/ailimits/releases/latest'
+$release = Invoke-RestMethod 'https://api.github.com/repos/study-233/ailimits/releases/latest'
 $asset = $release.assets | Where-Object { $_.name -like 'AiLimits-Setup-*.exe' } | Select-Object -First 1
 if (-not $asset) { throw 'no installer asset found on the latest release' }
 

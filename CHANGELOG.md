@@ -2,6 +2,28 @@
 
 Notable, user-visible changes. Dates are release dates.
 
+## 0.1.0 - 2026-09-17
+
+First official release of the **study-233 fork**, based on upstream 0.6.4. Earlier entries below describe upstream releases.
+
+### 中文
+
+- 首个正式版：任务栏圆环与百分比显示 Codex 每周剩余额度，并显示 Codex 标签、数据状态及本地时间的重置提示。
+- 支持简体中文／English／跟随系统，支持实时 Windows 静态系统代理和直连切换。
+- 新增圆环与数字独立外观设置、深浅色实时预览、保存／取消、拖动定位、位置锁定与恢复自动位置。
+- 移除桌面悬浮窗；保留任务栏面板和手动选择的托盘模式，不因空间不足自动切换。
+- 提供 Windows 11 x64 安装包、便携 ZIP、中英文说明和 SHA-256 校验文件；自动更新仅使用本 fork，并校验安装器摘要。
+- **首次升级需手动安装：** 本 fork 从 0.1.0 重新编号，旧 0.6.4 开发构建不会自动升级到更小的版本号。安装路径、安装标识和配置沿用原项目，安装版会替换已有安装；便携版以后继续手动更新。
+
+### English
+
+- Codex weekly remaining quota ring, percentage, provider label and reset tooltip on the Windows 11 taskbar.
+- Live Simplified Chinese/English switching and Windows static system-proxy/direct connection modes.
+- Independent ring and number styling, live light/dark previews, Save/Cancel, dragging, position locking and automatic placement reset.
+- Desktop overlay removed; taskbar panel and manually selected tray mode remain.
+- Windows x64 installer, portable ZIP, bilingual documentation and SHA-256 checksums. Installer updates use this fork and require a verified digest.
+- **Install this first release manually:** versioning restarts at 0.1.0, so previous 0.6.4 development builds will not offer it as an update. The installer replaces an existing installation and preserves configuration compatibility. Portable copies continue to update manually.
+
 ## 0.6.4 - 2026-09-12
 
 ### Fixed

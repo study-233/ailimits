@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// hooks…). This mirrors the tolerance already applied to unknown fields
 /// (ignored) and unknown providers (skipped) — see docs: "old configs never
 /// break parsing".
-fn de_enum_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(super) fn de_enum_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de> + Default,
@@ -24,6 +24,10 @@ where
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub appearance: super::appearance::Appearance,
+    #[serde(default)]
+    pub network: NetworkConfig,
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
@@ -42,6 +46,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            appearance: super::appearance::Appearance::default(),
+            network: NetworkConfig::default(),
             general: GeneralConfig::default(),
             window: WindowConfig::default(),
             ui: UIConfig::default(),
@@ -99,11 +105,20 @@ fn default_providers() -> Vec<ProviderConfig> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
+    #[serde(default)]
+    pub panel_locked: bool,
+    /// Manual X in DIP relative to the selected taskbar; None means automatic.
+    #[serde(default)]
+    pub panel_position_x: Option<i32>,
+    /// Desktop widget visibility. The taskbar is the default entry point.
+    #[serde(default)]
+    pub show_widget: bool,
+    #[serde(default, deserialize_with = "de_enum_or_default")]
+    pub language: Language,
     #[serde(default = "default_update_interval")]
     pub update_interval_secs: u64,
-    /// Secondary usage indicator besides the widget. Supersedes the legacy
-    /// `show_tray_icon` flag (old configs: the unknown field is ignored and
-    /// this defaults to Tray, which matches the old default).
+    /// Taskbar entry point; defaults to the Codex weekly remaining panel.
+    /// The legacy `show_tray_icon` field is ignored.
     #[serde(default, deserialize_with = "de_enum_or_default")]
     pub indicator: IndicatorKind,
     /// Silently install newer releases in the background. On by default; the
@@ -127,6 +142,10 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
+            panel_locked: false,
+            panel_position_x: None,
+            show_widget: false,
+            language: Language::Auto,
             update_interval_secs: default_update_interval(),
             indicator: IndicatorKind::default(),
             auto_update: default_auto_update(),
@@ -135,6 +154,44 @@ impl Default for GeneralConfig {
             panel_display: PanelDisplay::Primary,
         }
     }
+}
+
+impl GeneralConfig {
+    /// Keep a reachable menu when the desktop widget is disabled.
+    pub fn ensure_visible_entry(&mut self) {
+        self.show_widget = false;
+        if self.indicator == IndicatorKind::Off {
+            self.indicator = IndicatorKind::PanelRows;
+        }
+        if self.indicator == IndicatorKind::Bars {
+            self.indicator = IndicatorKind::Tray;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Language {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "zh-CN")]
+    Chinese,
+    #[serde(rename = "en")]
+    English,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    #[serde(default, deserialize_with = "de_enum_or_default")]
+    pub proxy_mode: ProxyMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyMode {
+    #[default]
+    System,
+    Direct,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -312,18 +369,14 @@ pub enum DetailLevel {
     Expanded,
 }
 
-/// The taskbar usage indicator: a tray ring icon, a 16px tray icon with
-/// stacked bars (legacy, config-only), a transparent overlay painted over
-/// the taskbar next to the tray (monochrome, system-theme-following; the
-/// two busiest providers as clock-sized "percent + bar" rows), or none.
-/// `PanelGrid` is a legacy alias of `PanelRows` — the overlay renders both
-/// identically; old configs keep parsing.
+/// Taskbar indicator: the default panel shows Codex weekly remaining quota.
+/// Tray and Bars retain legacy usage icons. PanelGrid aliases PanelRows.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IndicatorKind {
-    #[default]
     Tray,
     Bars,
+    #[default]
     PanelRows,
     PanelGrid,
     Off,

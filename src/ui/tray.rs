@@ -1,30 +1,20 @@
-// ui/tray.rs — tray-area usage indicators.
-//
-// Two modes (config `general.indicator`), both a SINGLE tray icon:
-//   Tray — two concentric rings, the busiest provider outside and the
-//          runner-up inside, each sweeping clockwise from 12 o'clock.
-//          Deliberately monochrome: it inks itself in the system taskbar
-//          theme rather than the widget palette, so it stays readable on a
-//          light or a dark bar and the shape alone carries the reading.
-//   Bars — horizontal progress bars stacked one above the other, one row
-//          per visible provider (the meter style competitors use); with a
-//          single provider the row gains its percent number on top.
-// Drawn with the same tiny-skia pipeline as the widget so colors match the
-// palette. Images are re-rendered only when an integer % changes, to stay
-// at ~0% idle CPU. The icon carries the same context menu as the widget;
-// a left-click toggles the overlay.
+//! Tray and panel fallback both show the same Codex weekly remaining ring.
+//! Bars is a config-only legacy usage view.
 
 use crate::config::schema::IndicatorKind;
 use crate::providers::{ProviderData, ProviderStatus};
 use crate::ui::theme::{ComputedTheme, UsageLevel};
 use anyhow::{Context, Result};
-use tiny_skia::{LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
+#[cfg(test)]
+use tiny_skia::{LineCap, LineJoin, Stroke};
+use tiny_skia::{Paint, PathBuilder, Pixmap, Transform};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 /// Source render size; Windows scales it down to the tray's DPI size.
 const ICON_SIZE: u32 = 32;
 
 pub struct Tray {
+    appearance: crate::config::appearance::Appearance,
     mode: IndicatorKind,
     icon: Option<TrayIcon>,
     /// Last drawn integer % per provider row (a single entry in Tray mode),
@@ -33,53 +23,76 @@ pub struct Tray {
     /// Re-run icon promotion on the next update: Explorer may create the
     /// NotifyIconSettings registry keys a moment after the icon appears.
     promote_pending: bool,
-    /// The current icon is a transient Start-menu fallback (shown while a Panel
-    /// indicator is occluded by the Start/Search scrim), not a configured tray
-    /// mode. It renders the busiest-provider rings, like Tray mode.
-    fallback: bool,
 }
 
 impl Tray {
+    pub fn set_appearance(&mut self, appearance: crate::config::appearance::Appearance) {
+        self.appearance = appearance;
+        self.last.clear();
+    }
+
+    pub fn replace_menu(&self, menu: &muda::Menu) {
+        if let Some(icon) = &self.icon {
+            icon.set_menu(Some(Box::new(menu.clone())));
+        }
+    }
     pub fn new() -> Self {
         Self {
+            appearance: crate::config::appearance::Appearance::default(),
             mode: IndicatorKind::Off,
             icon: None,
             last: Vec::new(),
             promote_pending: false,
-            fallback: false,
         }
     }
 
-    /// Switch the indicator mode, creating/dropping the tray icon as needed.
+    /// Prepare the requested entry before the caller hides the existing panel.
     pub fn set_mode(
         &mut self,
         mode: IndicatorKind,
         menu: &muda::Menu,
         providers: &[ProviderData],
         theme: &ComputedTheme,
-    ) {
-        self.mode = mode;
-        // Only the icon modes belong to the tray; the panel modes (and Off)
-        // drop the icon — the TaskbarPanel owns those.
+    ) -> bool {
         if !matches!(mode, IndicatorKind::Tray | IndicatorKind::Bars) {
-            // Dropping the TrayIcon removes it from the tray. A panel-mode
-            // Start-fallback icon (if any) goes with it.
             self.icon = None;
             self.last.clear();
-            self.fallback = false;
-            return;
+            self.mode = mode;
+            return true;
         }
-        if self.icon.is_none() {
-            match build_icon(menu, "AI Limits") {
-                Ok(t) => self.icon = Some(t),
-                Err(e) => tracing::warn!("tray create failed: {e}"),
+        if let Some(icon) = self.icon.as_ref() {
+            if icon.set_visible(true).is_err() {
+                return false;
             }
-            // Pin our icon to the visible taskbar corner (out of the overflow).
-            let n = crate::platform::promote_tray_icons();
-            tracing::debug!("tray icons promoted: {n}");
-            self.promote_pending = true;
+            icon.set_menu(Some(Box::new(menu.clone())));
+        } else {
+            match build_icon(menu, "AI Limits") {
+                Ok(icon) => {
+                    if icon.set_visible(true).is_err() {
+                        return false;
+                    }
+                    self.icon = Some(icon);
+                }
+                Err(e) => {
+                    tracing::warn!("tray create failed: {e}");
+                    return false;
+                }
+            }
         }
+        // tray-icon's Windows set_visible() returns Ok even when the shell
+        // rejects registration. Verify the shell knows this icon before the
+        // caller removes the panel that currently provides the menu.
+        if !self.icon.as_ref().is_some_and(|icon| icon.rect().is_some()) {
+            self.icon = None;
+            tracing::warn!("shell did not register tray icon; retaining current panel");
+            return false;
+        }
+        self.mode = mode;
+        self.last.clear();
+        crate::platform::promote_tray_icons();
+        self.promote_pending = true;
         self.update(providers, theme, true);
+        true
     }
 
     /// Refresh the icon image (only when a % changed, or `force`) and tooltip.
@@ -87,11 +100,14 @@ impl Tray {
         let Some(icon) = self.icon.as_ref() else {
             return;
         };
-        // A Start-fallback icon renders the rings, exactly like Tray mode.
-        let rings = self.fallback || matches!(self.mode, IndicatorKind::Tray);
+        // Explicit Tray and panel fallback share the weekly quota and renderer.
+        let rings = matches!(self.mode, IndicatorKind::Tray);
+        let weekly = super::weekly::WeeklyQuota::from_providers(providers);
         let state: Vec<Option<u8>> = if rings {
-            // Both rings — see ring_cache_state.
-            ring_cache_state(providers)
+            vec![
+                weekly.remaining.map(|p| p.round() as u8),
+                Some(u8::from(weekly.muted())),
+            ]
         } else if matches!(self.mode, IndicatorKind::Bars) {
             // One bar row per provider.
             providers
@@ -108,8 +124,9 @@ impl Tray {
             // match so it stays readable on a light taskbar.
             let light = crate::platform::system_uses_light_theme();
             let img = if rings {
-                // The ring icon is monochrome by design — it takes no theme.
-                draw_ring_icon(providers, light)
+                let mut pm = Pixmap::new(ICON_SIZE, ICON_SIZE).expect("tray dimensions");
+                super::weekly::paint_styled_ring(&mut pm, &weekly, light, &self.appearance);
+                to_icon(&pm)
             } else {
                 draw_stacked_icon(providers, theme, light)
             };
@@ -117,60 +134,16 @@ impl Tray {
                 let _ = icon.set_icon(Some(img));
             }
         }
-        let _ = icon.set_tooltip(Some(tooltip(providers)));
+        let _ = icon.set_tooltip(Some(if rings {
+            weekly.tooltip()
+        } else {
+            tooltip(providers)
+        }));
         // Second promotion pass once the registry keys surely exist.
         if self.promote_pending {
             self.promote_pending = false;
             let n = crate::platform::promote_tray_icons();
             tracing::debug!("tray icons promoted (second pass): {n}");
-        }
-    }
-
-    /// A Panel indicator cannot paint over the Start menu (a protected z-band
-    /// no overlay can beat). While the Start/Search scrim is up, fall back to a
-    /// tray icon — which the shell keeps visible — showing the busiest
-    /// provider's %; hide it again the instant the scrim closes and the panel
-    /// overlay is visible once more. No-op outside the Panel modes (Tray/Bars
-    /// already show an icon; Off shows nothing). Event-driven (the foreground
-    /// watch), so idle CPU is unaffected.
-    pub fn set_scrim_fallback(
-        &mut self,
-        active: bool,
-        menu: &muda::Menu,
-        providers: &[ProviderData],
-        theme: &ComputedTheme,
-    ) {
-        if !matches!(
-            self.mode,
-            IndicatorKind::PanelRows | IndicatorKind::PanelGrid
-        ) {
-            return;
-        }
-        if active {
-            if self.icon.is_none() {
-                match build_icon(menu, "AI Limits") {
-                    Ok(t) => self.icon = Some(t),
-                    Err(e) => {
-                        tracing::warn!("tray fallback create failed: {e}");
-                        return;
-                    }
-                }
-                self.fallback = true;
-                self.last.clear();
-                let n = crate::platform::promote_tray_icons();
-                tracing::debug!("tray fallback promoted: {n}");
-                self.promote_pending = true;
-            }
-            if let Some(icon) = self.icon.as_ref() {
-                let _ = icon.set_visible(true);
-            }
-            self.update(providers, theme, true);
-        } else if self.fallback {
-            // Keep the icon alive (so it stays promoted) but hide it; the panel
-            // overlay takes over again.
-            if let Some(icon) = self.icon.as_ref() {
-                let _ = icon.set_visible(false);
-            }
         }
     }
 
@@ -214,6 +187,7 @@ pub(crate) fn provider_pct(data: &ProviderData) -> Option<f32> {
 /// Providers without a usable percentage are never candidates. Ties keep the
 /// order the widget shows them in, so two providers sitting at the same number
 /// do not trade rings from one refresh to the next.
+#[cfg(test)]
 pub(crate) fn two_busiest(providers: &[ProviderData]) -> (Option<u8>, Option<u8>) {
     let mut pcts: Vec<u8> = providers
         .iter()
@@ -228,6 +202,7 @@ pub(crate) fn two_busiest(providers: &[ProviderData]) -> (Option<u8>, Option<u8>
 
 /// What the repaint cache must hold: BOTH rings. Caching only the busiest
 /// would freeze the icon whenever the second-place provider moved.
+#[cfg(test)]
 pub(crate) fn ring_cache_state(providers: &[ProviderData]) -> Vec<Option<u8>> {
     let (first, second) = two_busiest(providers);
     vec![first, second]
@@ -285,41 +260,14 @@ fn neutral_icon(light: bool) -> Result<Icon> {
 /// The other cost of a thicker stroke lands on the inner ring: a round cap
 /// spans `RING_W/2` of a circumference that shrinks with every step inward, so
 /// values under ~15% no longer fit as an arc there and degrade to a dot.
+#[cfg(test)]
 const RING_W: f32 = 5.0;
 /// The icon square's centre — every ring is concentric on it.
 const CENTER: f32 = ICON_SIZE as f32 / 2.0;
+#[cfg(test)]
 const RING_OUTER: f32 = 15.0;
+#[cfg(test)]
 const RING_STEP: f32 = 7.0;
-
-fn draw_ring_icon(providers: &[ProviderData], light: bool) -> Result<Icon> {
-    let mut pm = Pixmap::new(ICON_SIZE, ICON_SIZE).context("pixmap alloc")?;
-    pm.fill(tiny_skia::Color::TRANSPARENT);
-    // One ink for everything. The tray sits on the system taskbar, whose theme
-    // is independent of the widget's palette, and at 16px a hue difference is
-    // far weaker than the arc length — so the shape does the talking.
-    let ink = tray_ink(light, 255);
-    let track = tray_ink(light, 64);
-
-    match two_busiest(providers) {
-        // Two or more providers with data: the busiest takes the outer ring,
-        // the runner-up the inner one. Which is which is answered by the
-        // tooltip, which lists every provider with its percentage.
-        (Some(first), Some(second)) => {
-            draw_ring(&mut pm, RING_OUTER, first as f32, ink, track);
-            draw_ring(&mut pm, RING_OUTER - RING_STEP, second as f32, ink, track);
-        }
-        // Exactly one: the outer ring alone, so the icon keeps its meaning
-        // when a second provider starts reporting — nothing moves, a ring
-        // simply appears inside.
-        (Some(only), None) => {
-            draw_ring(&mut pm, RING_OUTER, only as f32, ink, track);
-        }
-        // No percentage data yet (loading / binary / error).
-        _ => fill_circle(&mut pm, CENTER, CENTER, 5.0, tray_ink(light, 200)),
-    }
-
-    to_icon(&pm)
-}
 
 /// 12 o'clock, where every ring starts.
 const RING_TOP: f32 = -std::f32::consts::FRAC_PI_2;
@@ -333,7 +281,7 @@ const RING_TOP: f32 = -std::f32::consts::FRAC_PI_2;
 /// the angles to *sweep*, already pulled in by one cap at each end, so that the
 /// visible ink spans exactly the percentage and no more.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum RingFill {
+pub(super) enum RingFill {
     /// Nothing to paint.
     Empty,
     /// Shorter than the two caps it would grow — a single cap-sized dot at the
@@ -351,7 +299,7 @@ fn cap_angle(w: f32, r_mid: f32) -> f32 {
 }
 
 /// Decide what `pct` paints on a ring of stroke `w` centred on radius `r_mid`.
-fn ring_fill(pct: f32, r_mid: f32, w: f32) -> RingFill {
+pub(super) fn ring_fill(pct: f32, r_mid: f32, w: f32) -> RingFill {
     let frac = (pct / 100.0).clamp(0.0, 1.0);
     if frac <= 0.0 {
         return RingFill::Empty;
@@ -371,6 +319,7 @@ fn ring_fill(pct: f32, r_mid: f32, w: f32) -> RingFill {
 }
 
 /// One ring: the faint full-circle track, then the used arc over it.
+#[cfg(test)]
 fn draw_ring(
     pm: &mut Pixmap,
     outer: f32,
@@ -398,6 +347,7 @@ fn draw_ring(
 /// Stroke an arc as a polyline. tiny-skia's PathBuilder has no arc primitive;
 /// sampling finely enough that each segment is well under a pixel makes the
 /// difference invisible once the shell scales the icon down.
+#[cfg(test)]
 fn stroke_arc(
     pm: &mut Pixmap,
     r_mid: f32,
@@ -513,21 +463,17 @@ fn draw_stacked_icon(
 
 /// The shared UI font, loaded once (same candidate chain renderer.rs uses, so
 /// the tray/panel survive a missing Segoe UI exactly like the main widget).
-fn font() -> Option<&'static fontdue::Font> {
-    use std::sync::OnceLock;
-    static FONT: OnceLock<Option<fontdue::Font>> = OnceLock::new();
-    FONT.get_or_init(crate::ui::renderer::load_ui_font).as_ref()
+fn font() -> Option<&'static super::fonts::Fonts> {
+    super::fonts::fonts()
 }
 
 /// Measure the rendered ink bounds of `text` at `size`.
 fn digits_bounds(
-    font: &fontdue::Font,
+    font: &super::fonts::Fonts,
     text: &str,
     size: f32,
 ) -> Option<(fontdue::layout::Layout, f32, f32, f32, f32)> {
-    use fontdue::layout::{CoordinateSystem, Layout, TextStyle};
-    let mut tl = Layout::new(CoordinateSystem::PositiveYDown);
-    tl.append(&[font], &TextStyle::new(text, size, 0));
+    let tl = font.layout(text, size);
     let (mut min_x, mut max_x) = (f32::MAX, f32::MIN);
     let (mut min_y, mut max_y) = (f32::MAX, f32::MIN);
     for g in tl.glyphs() {
@@ -577,7 +523,7 @@ pub(crate) fn draw_digits_fit(
     let h = pm.height() as i32;
     let data = pm.data_mut();
     for g in glyphs {
-        let (metrics, bitmap) = font.rasterize_config(g.key);
+        let (metrics, bitmap) = font.rasterize(g);
         for (i, &cov) in bitmap.iter().enumerate() {
             if cov == 0 {
                 continue;
@@ -796,7 +742,7 @@ fn draw_text_at(pm: &mut Pixmap, text: &str, x: f32, y: f32, size: f32, c: tiny_
     let h = pm.height() as i32;
     let data = pm.data_mut();
     for g in tl.glyphs() {
-        let (metrics, bitmap) = font.rasterize_config(g.key);
+        let (metrics, bitmap) = font.rasterize(g);
         for (i, &cov) in bitmap.iter().enumerate() {
             if cov == 0 {
                 continue;

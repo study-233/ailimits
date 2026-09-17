@@ -28,21 +28,23 @@ const HEADER_REQUESTS_RESET: &str = "anthropic-ratelimit-requests-reset";
 
 pub struct ClaudeProvider {
     config: ProviderConfig,
-    http: reqwest::Client,
+}
+
+// Classify transport failures before authentication guidance. An unavailable
+// proxy says nothing about whether a token is expired.
+fn subscription_failure(rate_limited: bool, network_error: Option<String>) -> ProviderStatus {
+    if let Some(error) = network_error {
+        ProviderStatus::NetworkError(error)
+    } else if rate_limited {
+        ProviderStatus::NetworkError("rate-limited, retrying".into())
+    } else {
+        ProviderStatus::AuthError("token expired".into())
+    }
 }
 
 impl ClaudeProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            // These usage endpoints never legitimately redirect; refusing 3xx
-            // removes any chance of forwarding a bearer / x-api-key header to a
-            // different host (reqwest only strips Authorization, not x-api-key).
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("Failed to build HTTP client");
-
-        Self { config, http }
+        Self { config }
     }
 
     /// API key from Windows Credential Manager.
@@ -66,8 +68,7 @@ impl ClaudeProvider {
 
     /// Method A: API key → rate limit headers.
     async fn fetch_via_api_key(&self, api_key: &str) -> Result<ProviderData> {
-        let resp = match self
-            .http
+        let resp = match crate::network::client(crate::network::Profile::Provider)?
             .get(CLAUDE_MODELS_URL)
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
@@ -141,7 +142,10 @@ impl ClaudeProvider {
         let credentials_path = claude_dir.join(".credentials.json");
         let statusline_path = claude_dir.join("statusline.jsonl");
         // Real limit sources; stats-cache holds no limits and does not count.
-        let has_source = credentials_path.exists() || statusline_path.exists();
+        let manual_token = self.get_usage_token();
+        let has_source =
+            credentials_path.exists() || statusline_path.exists() || manual_token.is_some();
+        let mut network_error = None;
 
         // Whether a usage request bounced off the endpoint's rate limiter
         // this cycle — only to word the error honestly below (a 429 is not
@@ -150,11 +154,14 @@ impl ClaudeProvider {
 
         // 0. Manual usage token: a minimal read-only usage request.
         // Rejected → quietly fall back to the Claude Code sources.
-        if let Some(token) = self.get_usage_token() {
+        if let Some(token) = manual_token {
             match self.fetch_via_oauth(&token, &mut rate_limited).await {
                 Ok(Some(data)) => return Ok(data),
                 Ok(None) => warn!("stored Claude usage token was rejected, falling back"),
-                Err(e) => warn!("stored Claude usage token fetch failed: {e}"),
+                Err(e) => {
+                    warn!("stored Claude usage token fetch failed: {e}");
+                    network_error = Some(e.to_string());
+                }
             }
         }
 
@@ -164,7 +171,10 @@ impl ClaudeProvider {
             Ok(Some(token)) => match self.fetch_via_oauth(&token, &mut rate_limited).await {
                 Ok(Some(data)) => return Ok(data),
                 Ok(None) => { /* expired or 401 — fall back */ }
-                Err(e) => warn!("oauth usage fetch error: {e}"),
+                Err(e) => {
+                    warn!("oauth usage fetch error: {e}");
+                    network_error = Some(e.to_string());
+                }
             },
             Ok(None) => { /* no file or token — fall back */ }
             Err(e) => warn!(".credentials.json parse error: {e}"),
@@ -186,12 +196,8 @@ impl ClaudeProvider {
         // blaming the token.
         if has_source {
             // Short message — the renderer shows it instead of a generic "offline".
-            let msg = if rate_limited {
-                "rate-limited, retrying"
-            } else {
-                "token expired"
-            };
-            return Ok(self.data(ProviderStatus::NetworkError(msg.to_string()), vec![]));
+            let status = subscription_failure(rate_limited, network_error);
+            return Ok(self.data(status, vec![]));
         }
 
         // 4. No sources at all — hint to run Claude Code.
@@ -205,8 +211,7 @@ impl ClaudeProvider {
         token: &str,
         rate_limited: &mut bool,
     ) -> Result<Option<ProviderData>> {
-        let resp = self
-            .http
+        let resp = crate::network::client(crate::network::Profile::Provider)?
             .get(OAUTH_USAGE_URL)
             .bearer_auth(token)
             .header("anthropic-beta", OAUTH_BETA_HEADER)
@@ -516,5 +521,25 @@ impl Provider for ClaudeProvider {
             },
             AuthMethod::Subscription => self.fetch_via_subscription().await,
         }
+    }
+}
+
+#[cfg(test)]
+mod network_failure_tests {
+    use super::*;
+    #[test]
+    fn proxy_failure_is_not_reported_as_expired_authentication() {
+        assert!(
+            matches!(subscription_failure(false, Some("proxy unavailable".into())),
+            ProviderStatus::NetworkError(message) if message == "proxy unavailable")
+        );
+        assert!(matches!(
+            subscription_failure(true, None),
+            ProviderStatus::NetworkError(_)
+        ));
+        assert!(matches!(
+            subscription_failure(false, None),
+            ProviderStatus::AuthError(_)
+        ));
     }
 }

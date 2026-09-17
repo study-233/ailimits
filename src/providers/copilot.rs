@@ -19,23 +19,14 @@ const GH_TOKEN_TTL: std::time::Duration = std::time::Duration::from_secs(15 * 60
 
 pub struct CopilotProvider {
     config: ProviderConfig,
-    http: reqwest::Client,
     /// gh CLI token cache: (token, fetched_at).
     gh_token_cache: std::sync::Mutex<Option<(String, std::time::Instant)>>,
 }
 
 impl CopilotProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            // Never follow a 3xx — keeps the token from leaking to a
-            // redirected host. The internal endpoint returns 200 directly.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("Failed to build HTTP client");
         Self {
             config,
-            http,
             gh_token_cache: std::sync::Mutex::new(None),
         }
     }
@@ -85,8 +76,7 @@ impl CopilotProvider {
 
     /// Internal subscription quota endpoint.
     async fn fetch_via_internal(&self, token: &str) -> Result<ProviderData> {
-        let resp = match self
-            .http
+        let resp = match crate::network::client(crate::network::Profile::Provider)?
             .get(COPILOT_INTERNAL_URL)
             // "token …" format, the same the Copilot extensions use.
             .header("Authorization", format!("token {token}"))

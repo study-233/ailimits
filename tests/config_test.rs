@@ -23,6 +23,35 @@ fn empty_toml_parses_to_defaults() {
 }
 
 #[test]
+fn manual_taskbar_position_roundtrips_and_old_configs_stay_automatic() {
+    let old: Config = toml::from_str("[general]\nindicator = \"panel_rows\"").unwrap();
+    assert_eq!(old.general.panel_position_x, None);
+    let mut config = old;
+    config.general.panel_position_x = Some(420);
+    let parsed: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(parsed.general.panel_position_x, Some(420));
+}
+
+#[test]
+fn widget_visibility_persists_and_disabled_widget_keeps_an_entry() {
+    let mut config: Config =
+        toml::from_str("[general]\nindicator = \"off\"\nupdate_interval_secs = 900").unwrap();
+    assert!(!config.general.show_widget);
+    config.general.ensure_visible_entry();
+    assert_eq!(config.general.indicator, IndicatorKind::PanelRows);
+    assert_eq!(config.general.update_interval_secs, 900);
+    for show in [true, false] {
+        config.general.show_widget = show;
+        let parsed: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(parsed.general.show_widget, show);
+    }
+    config.general.show_widget = true;
+    config.general.indicator = IndicatorKind::Off;
+    config.general.ensure_visible_entry();
+    assert_eq!(config.general.indicator, IndicatorKind::PanelRows);
+}
+
+#[test]
 fn legacy_config_with_removed_fields_still_parses() {
     // A legacy config with removed fields must not break parsing —
     // unknown fields and providers are ignored.
@@ -51,9 +80,12 @@ fn partial_toml_keeps_defaults_for_missing_fields() {
 }
 
 #[test]
-fn indicator_defaults_to_tray_and_parses_values() {
-    // The default secondary indicator is the tray icon (the old behaviour).
-    assert_eq!(Config::default().general.indicator, IndicatorKind::Tray);
+fn indicator_defaults_to_panel_and_parses_values() {
+    // The default entry point is the weekly remaining taskbar panel.
+    assert_eq!(
+        Config::default().general.indicator,
+        IndicatorKind::PanelRows
+    );
 
     let config: Config = toml::from_str("[general]\nindicator = \"bars\"").expect("parse");
     assert_eq!(config.general.indicator, IndicatorKind::Bars);
@@ -68,10 +100,10 @@ fn indicator_defaults_to_tray_and_parses_values() {
 #[test]
 fn legacy_show_tray_icon_field_is_ignored() {
     // Pre-0.3 configs carry `show_tray_icon`; the unknown field must be
-    // ignored and the indicator falls back to Tray.
+    // ignored and the indicator falls back to the taskbar panel.
     let config: Config =
         toml::from_str("[general]\nshow_tray_icon = false").expect("legacy config should parse");
-    assert_eq!(config.general.indicator, IndicatorKind::Tray);
+    assert_eq!(config.general.indicator, IndicatorKind::PanelRows);
 }
 
 #[test]
@@ -176,4 +208,45 @@ fn config_roundtrip_serialization() {
     let serialized = toml::to_string_pretty(&config).expect("should serialize");
     let parsed: Config = toml::from_str(&serialized).expect("should parse back");
     assert_eq!(parsed.providers.len(), config.providers.len());
+}
+#[test]
+fn language_and_proxy_preferences_are_backward_compatible() {
+    use ailimits::config::schema::{Config, Language, ProxyMode};
+    let old: Config = toml::from_str("[general]\nupdate_interval_secs = 900").unwrap();
+    assert_eq!(old.general.language, Language::Auto);
+    assert_eq!(old.network.proxy_mode, ProxyMode::System);
+    assert_eq!(old.general.update_interval_secs, 900);
+    let explicit: Config =
+        toml::from_str("[general]\nlanguage = 'zh-CN'\n[network]\nproxy_mode = 'direct'").unwrap();
+    let restored: Config = toml::from_str(&toml::to_string(&explicit).unwrap()).unwrap();
+    assert_eq!(restored.general.language, Language::Chinese);
+    assert_eq!(restored.network.proxy_mode, ProxyMode::Direct);
+    let invalid: Config = toml::from_str("[general]\nlanguage = 'unknown'\nupdate_interval_secs = 900\n[network]\nproxy_mode = 'unknown'").unwrap();
+    assert_eq!(invalid.general.language, Language::Auto);
+    assert_eq!(invalid.network.proxy_mode, ProxyMode::System);
+    assert_eq!(invalid.general.update_interval_secs, 900);
+}
+
+#[test]
+fn lock_migration_and_bad_appearance_preserve_siblings() {
+    use ailimits::config::storage::migrate_taskbar_preferences;
+    let legacy="[general]\nshow_widget=true\nindicator='off'\nupdate_interval_secs=900\n[window]\nlocked=true\n[appearance]\nring_color='bad'\nnumber_color='#123456'\nring_size='large'\nnumber_x=127\nnumber_weight='unknown'";
+    let mut config: Config = toml::from_str(legacy).unwrap();
+    migrate_taskbar_preferences(&mut config, legacy);
+    assert!(config.general.panel_locked);
+    assert!(!config.general.show_widget);
+    assert_eq!(config.general.indicator, IndicatorKind::PanelRows);
+    assert_eq!(config.general.update_interval_secs, 900);
+    assert_eq!(config.appearance.ring_size, 28);
+    assert_eq!(config.appearance.number_x, 127);
+    assert_eq!(config.appearance.number_color, "#123456");
+    let new = legacy.replace("[general]", "[general]\npanel_locked=false");
+    let mut config: Config = toml::from_str(&new).unwrap();
+    migrate_taskbar_preferences(&mut config, &new);
+    assert!(!config.general.panel_locked);
+    let serialized = toml::to_string(&config).unwrap();
+    let mut restored: Config = toml::from_str(&serialized).unwrap();
+    migrate_taskbar_preferences(&mut restored, &serialized);
+    assert!(!restored.general.panel_locked);
+    assert_eq!(restored.appearance, config.appearance);
 }

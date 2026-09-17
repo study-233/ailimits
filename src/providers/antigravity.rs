@@ -32,7 +32,6 @@ const ANTIGRAVITY_CREDENTIAL_TARGET: &str = "gemini:antigravity";
 
 pub struct AntigravityProvider {
     config: ProviderConfig,
-    http: reqwest::Client,
     /// Code Assist project id from loadCodeAssist, cached after the first
     /// success — it is stable for the account, and quota queries need it.
     project: std::sync::Mutex<Option<String>>,
@@ -72,16 +71,8 @@ fn identified(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 
 impl AntigravityProvider {
     pub fn new(config: ProviderConfig) -> Self {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            // Never follow a 3xx — keeps the bearer token from leaking to a
-            // redirected host. The quota endpoint returns 200 directly.
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("Failed to build HTTP client");
         Self {
             config,
-            http,
             project: std::sync::Mutex::new(None),
         }
     }
@@ -89,12 +80,13 @@ impl AntigravityProvider {
     /// One fetchAvailableModels request. 401/403 → TokenRejected; any other
     /// non-200 or an unparseable/empty body → Unusable.
     async fn fetch_models_quota(&self, token: &str, project: &str) -> Result<QuotaOutcome> {
-        let resp = identified(self.http.post(MODELS_URL))
-            .bearer_auth(token)
-            .header("Content-Type", "application/json")
-            .body(serde_json::json!({ "project": project }).to_string())
-            .send()
-            .await?;
+        let resp =
+            identified(crate::network::client(crate::network::Profile::Provider)?.post(MODELS_URL))
+                .bearer_auth(token)
+                .header("Content-Type", "application/json")
+                .body(serde_json::json!({ "project": project }).to_string())
+                .send()
+                .await?;
         match resp.status().as_u16() {
             200 => {}
             401 | 403 => return Ok(QuotaOutcome::TokenRejected),
@@ -115,12 +107,14 @@ impl AntigravityProvider {
     /// One retrieveUserQuotaSummary request. 401/403 → TokenRejected; any
     /// other non-200 or an unparseable/empty body → Unusable.
     async fn fetch_quota_summary(&self, token: &str, project: &str) -> Result<QuotaOutcome> {
-        let resp = identified(self.http.post(SUMMARY_URL))
-            .bearer_auth(token)
-            .header("Content-Type", "application/json")
-            .body(serde_json::json!({ "project": project }).to_string())
-            .send()
-            .await?;
+        let resp = identified(
+            crate::network::client(crate::network::Profile::Provider)?.post(SUMMARY_URL),
+        )
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .body(serde_json::json!({ "project": project }).to_string())
+        .send()
+        .await?;
         match resp.status().as_u16() {
             200 => {}
             401 | 403 => return Ok(QuotaOutcome::TokenRejected),
@@ -146,7 +140,11 @@ impl AntigravityProvider {
         if let Some(p) = self.project.lock().ok().and_then(|g| g.clone()) {
             return ProjectResolution::Project(p);
         }
-        let resp = match identified(self.http.post(LOAD_URL))
+        let client = match crate::network::client(crate::network::Profile::Provider) {
+            Ok(client) => client,
+            Err(_) => return ProjectResolution::Unusable,
+        };
+        let resp = match identified(client.post(LOAD_URL))
             .bearer_auth(token)
             .header("Content-Type", "application/json")
             .body("{}")
@@ -188,9 +186,7 @@ impl AntigravityProvider {
     /// at every request site so the wording never drifts.
     fn token_rejected(&self) -> ProviderData {
         self.data(
-            ProviderStatus::AuthError(
-                "Antigravity token rejected — run Antigravity CLI once".to_string(),
-            ),
+            ProviderStatus::AuthError("Antigravity token rejected".to_string()),
             vec![],
         )
     }

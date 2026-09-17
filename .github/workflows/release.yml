@@ -1,5 +1,4 @@
-# Installer auto-build on a v* tag push — the installer is attached
-# to the GitHub Release.
+# Build and verify all assets before creating a draft. Publish after review.
 name: release
 
 on:
@@ -9,125 +8,120 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-installer:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v6
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          targets: x86_64-pc-windows-msvc
+          components: clippy, rustfmt
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # A tag must never ship a build that fails the project's own gate.
-      - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Tests
-        run: cargo test
-
-      # Guard against version drift: the tag, Cargo.toml and the installer
-      # script must all agree, or CI would build AiLimits-Setup-<old>.exe and
-      # attach it to the <new> release (then the winget URL 404s and the About
-      # version is wrong).
-      - name: Verify version matches the tag
-        shell: pwsh
+      - name: Verify release versions
         run: |
-          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected a stable vX.Y.Z tag' }
           $cargo = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
           $iss = (Select-String -Path installer/ailimits.iss -Pattern '#define AppVersion "([^"]+)"').Matches[0].Groups[1].Value
-          Write-Host "tag=$tag  Cargo.toml=$cargo  ailimits.iss=$iss"
-          if ($tag -ne $cargo -or $tag -ne $iss) {
-            Write-Error "Version mismatch: tag '$tag', Cargo.toml '$cargo', ailimits.iss '$iss' must all match."
-            exit 1
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata/lockfile validation failed' }
+          $package = $metadata.packages | Where-Object name -eq 'ailimits'
+          if ($version -ne $cargo -or $version -ne $iss -or $version -ne $package.version) {
+            throw "Version mismatch: tag=$version Cargo=$cargo installer=$iss lock=$($package.version)"
           }
 
-      - name: Build (release-min)
-        run: cargo build --profile release-min
+      - name: Formatting
+        run: cargo fmt --all -- --check
 
-      # A portable zip alongside the installer: what Scoop installs, and the
-      # no-install option generally. The exe is statically linked, so the zip
-      # is just the two binaries plus the licence texts. The self-updater
-      # recognises an unmanaged copy and stands down (see updater.rs), so a
-      # portable install stays whatever version its manager put there.
-      - name: Portable zip
-        shell: pwsh
-        run: |
-          $v = "${{ github.ref_name }}" -replace '^v',''
-          New-Item -ItemType Directory -Force target\installer, target\portable | Out-Null
-          Copy-Item target\release-min\ailimits.exe, target\release-min\ailimits-auth.exe, LICENSE, TRADEMARKS.md, README.md target\portable\
-          Compress-Archive -Path target\portable\* -DestinationPath "target\installer\AiLimits-Portable-$v.zip" -Force
-          Get-FileHash "target\installer\AiLimits-Portable-$v.zip" -Algorithm SHA256 | Format-List
+      - name: Clippy (deny warnings)
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Build (release-min, Windows x64)
+        run: cargo build --locked --profile release-min --bins
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 
-      - name: Compile installer
-        run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          & $iscc "installer\ailimits.iss"
+      - name: Package installer, portable archive and checksums
+        run: ./tools/package-release.ps1 -Version ($env:RELEASE_TAG -replace '^v', '')
 
-      # Surface the installer's SHA256 so the winget manifest hash can be
-      # filled/verified against the exact published binary without guesswork.
-      - name: Installer SHA256
-        shell: pwsh
+      - name: Smoke-test installer on clean runner
         run: |
-          $exe = (Get-ChildItem target/installer/*.exe).FullName
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          Write-Host "Installer: $exe"
-          Write-Host "SHA256:    $hash"
-          "### Installer SHA256`n`n``$hash```n`nfor ``$(Split-Path $exe -Leaf)`` — paste into installer/winget/*.installer.yaml" |
-            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-
-      # Release notes come from CHANGELOG.md, not from the commit log: the
-      # changelog is written for users ("what changed for me"), --generate-notes
-      # lists commit subjects, which are written for the next developer. Falls
-      # back to generated notes when the tag has no changelog section, so a
-      # release is never blocked on it.
-      - name: Release notes from CHANGELOG
-        id: notes
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          $found = $false
-          if (Test-Path CHANGELOG.md) {
-              $lines = Get-Content CHANGELOG.md
-              $start = -1
-              $end = $lines.Count
-              # [regex]::Escape, not \Q..\E - PowerShell's -match is .NET regex,
-              # which has no \Q quoting, so a version with dots would match loosely.
-              $esc = [regex]::Escape($version)
-              for ($i = 0; $i -lt $lines.Count; $i++) {
-                  if ($lines[$i] -match "^##\s+$esc(\s|$)") { $start = $i + 1; continue }
-                  if ($start -ge 0 -and $lines[$i] -match '^##\s') { $end = $i; break }
-              }
-              if ($start -ge 0) {
-                  $body = ($lines[$start..($end - 1)] -join "`n").Trim()
-                  if ($body) {
-                      $body | Out-File -FilePath release-notes.md -Encoding utf8
-                      $found = $true
-                      Write-Host "Using the CHANGELOG section for $version"
-                  }
-              }
+          $v = $env:RELEASE_TAG -replace '^v', ''
+          $destination = Join-Path $env:RUNNER_TEMP 'AiLimits-install-check'
+          $setup = (Resolve-Path "target/installer/AiLimits-Setup-$v.exe").Path
+          $process = Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/TASKS=""', "/DIR=`"$destination`"") -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          foreach ($name in @('ailimits.exe', 'ailimits-auth.exe', 'README.md', 'README.zh-CN.md', 'LICENSE', 'TRADEMARKS.md')) {
+            $source = if ($name.EndsWith('.exe')) { Join-Path 'target/release-min' $name } else { $name }
+            if ((Get-FileHash $source).Hash -ne (Get-FileHash (Join-Path $destination $name)).Hash) {
+              throw "Installed file mismatch: $name"
+            }
           }
-          if (-not $found) { Write-Host "::warning::no CHANGELOG section for $version - falling back to generated notes" }
-          "found=$($found.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          & (Join-Path $destination 'ailimits-auth.exe') --help
+          if ($LASTEXITCODE -ne 0) { throw 'Installed authentication utility did not start' }
 
-      - name: Create GitHub Release
+      - name: Extract release notes
+        run: |
+          $version = [regex]::Escape(($env:RELEASE_TAG -replace '^v', ''))
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $section = [regex]::Match($changelog, "(?ms)^## $version(?:[^\r\n]*)\r?\n(.*?)(?=^## |\z)")
+          if (-not $section.Success -or -not $section.Groups[1].Value.Trim()) {
+            throw 'Missing release notes in CHANGELOG.md'
+          }
+          Set-Content target/release-notes.md $section.Groups[1].Value.Trim() -Encoding utf8
+
+      - name: Create or refresh draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $assets = (Get-ChildItem target/installer/*.exe, target/installer/*.zip).FullName
-          if ("${{ steps.notes.outputs.found }}" -eq "true") {
-            gh release create "${{ github.ref_name }}" @assets `
-              --title "AI Limits ${{ github.ref_name }}" `
-              --notes-file release-notes.md
+          $v = $env:RELEASE_TAG -replace '^v', ''
+          $assets = @("target/installer/AiLimits-Setup-$v.exe", "target/installer/AiLimits-Portable-$v.zip", 'target/installer/SHA256SUMS.txt')
+          $existing = gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Refusing to replace a published release' }
+            gh release edit $env:RELEASE_TAG --title "AI Limits (study-233 fork) $env:RELEASE_TAG" --notes-file target/release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update draft notes' }
+            gh release upload $env:RELEASE_TAG @assets --clobber
           } else {
-            gh release create "${{ github.ref_name }}" @assets `
-              --title "AI Limits ${{ github.ref_name }}" `
-              --generate-notes
+            gh release create $env:RELEASE_TAG @assets --verify-tag --draft --title "AI Limits (study-233 fork) $env:RELEASE_TAG" --notes-file target/release-notes.md
           }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload draft assets' }
+
+      - name: Verify uploaded draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = $env:RELEASE_TAG -replace '^v', ''
+          $destination = 'target/download-verification'
+          New-Item -ItemType Directory -Force $destination | Out-Null
+          gh release download $env:RELEASE_TAG --dir $destination --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download draft assets' }
+          $expectedNames = @("AiLimits-Setup-$v.exe", "AiLimits-Portable-$v.zip", 'SHA256SUMS.txt')
+          $actualNames = @(Get-ChildItem $destination -File | ForEach-Object Name)
+          if (Compare-Object $expectedNames $actualNames) { throw 'Unexpected or missing release assets' }
+          foreach ($name in $expectedNames) {
+            $built = (Get-FileHash (Join-Path 'target/installer' $name) -Algorithm SHA256).Hash
+            $downloaded = (Get-FileHash (Join-Path $destination $name) -Algorithm SHA256).Hash
+            if ($built -ne $downloaded) { throw "Uploaded asset hash mismatch: $name" }
+          }
+          'Draft assets downloaded and verified. Ready for publication as a stable Latest release.' | Out-File $env:GITHUB_STEP_SUMMARY -Append

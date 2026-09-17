@@ -4,6 +4,8 @@
 mod win;
 
 pub mod taskbar_geom;
+#[cfg(target_os = "windows")]
+pub(crate) mod taskbar_space;
 
 // Taskbar embedding for the mini panel (Windows-only by nature; the
 // callers in ui/taskbar_panel.rs are cfg-gated accordingly).

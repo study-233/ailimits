@@ -1,41 +1,29 @@
-// ui/taskbar_panel.rs — the mini indicator painted OVER the taskbar.
-//
-// NOT a window with a background: a per-pixel-alpha layered overlay whose
-// transparent pixels let the taskbar show through, so only the painted digits
-// and bars are visible — exactly like a native tray glyph, with no pasted
-// rectangle. (TrafficMonitor takes the other route — a real SetParent child of
-// Shell_TrayWnd, guarded by a fallback flag for when the insert fails. We stay
-// a free-floating overlay: no dependency on the shell accepting a foreign
-// child window, and nothing to unwind when it does not.)
-// Content is presented with UpdateLayeredWindow, not softbuffer.
-//
-// Design goal: look like a continuation of the taskbar. So it is MONOCHROME
-// and follows the SYSTEM theme — near-black ink on a light taskbar, near-white
-// on a dark one (read from the registry, repainted on WindowEvent::ThemeChanged)
-// — and the digits are rendered at the system-clock size, not blown up. Usage
-// is the bar's fill, never a hue. Layout (config `general.indicator`, both
-// PanelRows and PanelGrid map here): two clock-sized rows for the first two
-// providers in the WIDGET's order (not the busiest); each is "percent +
-// progress bar". The remaining providers stay in the tooltip. Auto-hide is tracked event-driven via
-// SetWinEventHook (UserEvent::TaskbarMoved) — slides away with the bar.
+//! Codex weekly remaining ring and percentage, painted over the taskbar.
+//! Tracks shell placement, theme, auto-hide and fullscreen suppression.
 
+use crate::config::appearance::Appearance;
 use crate::config::schema::IndicatorKind;
 use crate::providers::ProviderData;
-use crate::ui::tray::{color, draw_digits_fit, fill_round_rect, provider_pct};
+use crate::ui::tray::color;
+use crate::ui::weekly::{paint_styled_ring, WeeklyQuota};
 use anyhow::{Context as AnyhowContext, Result};
 use std::rc::Rc;
 use tao::window::{Window, WindowId};
 use tiny_skia::{Color, Pixmap};
 
 /// Base layout metrics at 100% DPI; desired_size() scales them to the bar.
+#[cfg(test)]
 const PAD_X: f32 = 8.0;
-const NUM_W: f32 = 34.0;
+#[cfg(test)]
+const NUM_W: f32 = 100.0;
+#[cfg(test)]
 const NUM_GAP: f32 = 7.0;
-const BAR_W: f32 = 62.0;
+#[cfg(test)]
+const RING_SIZE: f32 = 28.0;
 /// Gap between the overlay and the notification area.
 const TRAY_MARGIN: i32 = 10;
 /// Initial (hidden) window size; reposition() sizes it to the real taskbar.
-const INIT_W: u32 = 119;
+const INIT_W: u32 = 151;
 const INIT_H: u32 = 40;
 /// Background alpha (out of 255) of the otherwise-transparent overlay: just
 /// enough that every pixel catches the mouse (so the whole window is the
@@ -66,13 +54,6 @@ fn theme_ink(light: bool) -> (Color, Color) {
     }
 }
 
-/// The first two providers in the widget's display order. The mini-panel mirrors
-/// the order shown in the main widget — it does NOT re-sort by who is busiest
-/// (`providers` already arrives in the widget's order, via `visible_data`).
-fn first_two(providers: &[ProviderData]) -> Vec<&ProviderData> {
-    providers.iter().take(2).collect()
-}
-
 /// Premultiplied RGBA (tiny-skia) → premultiplied BGRA (top-down) for
 /// UpdateLayeredWindow.
 #[cfg(target_os = "windows")]
@@ -89,11 +70,17 @@ fn pixmap_to_bgra(pm: &Pixmap) -> Vec<u8> {
 }
 
 pub struct TaskbarPanel {
+    locked: bool,
+    appearance: Appearance,
+    content_width: f32,
+    position_x: Option<i32>,
+    last_position_x: Option<i32>,
+    drag: Option<PanelDrag>,
     window: Rc<Window>,
     pixmap: Pixmap,
     mode: IndicatorKind,
-    /// Last drawn integer % per provider, to skip no-op redraws.
-    last: Vec<Option<u8>>,
+    /// Include validity and staleness so unchanged percentages cannot mask errors.
+    last: Option<WeeklyQuota>,
     size: (u32, u32),
     /// Current screen placement, or None while hidden (taskbar slid away).
     rect: Option<(i32, i32, u32, u32)>,
@@ -123,6 +110,14 @@ pub struct TaskbarPanel {
     offset: (i32, i32),
     /// Which taskbar the panel attaches to.
     display: crate::config::schema::PanelDisplay,
+}
+
+struct PanelDrag {
+    pointer_x: i32,
+    left: i32,
+    original: Option<i32>,
+    last_original: Option<i32>,
+    moved: bool,
 }
 
 /// The tooltip window is ours, created with CreateWindowExW; nothing else owns
@@ -164,10 +159,16 @@ impl TaskbarPanel {
         );
         let pixmap = Pixmap::new(INIT_W, INIT_H).context("panel pixmap")?;
         Ok(Self {
+            locked: false,
+            appearance: Appearance::default(),
+            content_width: appearance_width(&Appearance::default()),
+            position_x: None,
+            last_position_x: None,
+            drag: None,
             window,
             pixmap,
             mode: IndicatorKind::Off,
-            last: Vec::new(),
+            last: None,
             size: (INIT_W, INIT_H),
             rect: None,
             suppressed: false,
@@ -198,7 +199,136 @@ impl TaskbarPanel {
 
     /// Point the panel at a taskbar. The caller re-positions afterwards.
     pub fn set_display(&mut self, target: crate::config::schema::PanelDisplay) {
+        self.cancel_drag();
+        self.last_position_x = None;
         self.display = target;
+    }
+
+    pub fn set_position(&mut self, x: Option<i32>) {
+        self.cancel_drag();
+        self.position_x = x;
+        self.last_position_x = None;
+        self.last = None;
+    }
+
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    pub fn set_appearance(&mut self, mut appearance: Appearance) {
+        appearance.normalize();
+        self.content_width = appearance_width(&appearance);
+        self.appearance = appearance;
+        self.last = None;
+    }
+
+    pub fn set_locked(&mut self, locked: bool) {
+        self.cancel_drag();
+        self.locked = locked;
+        if locked && self.position_x.is_none() {
+            self.position_x = self.last_position_x;
+        }
+    }
+
+    pub fn position(&self) -> Option<i32> {
+        self.position_x
+    }
+
+    pub fn begin_drag(&mut self) {
+        self.cancel_drag();
+        if self.locked {
+            return;
+        }
+        #[cfg(windows)]
+        if let Some((left, _, _, _)) = self.rect {
+            use windows::Win32::{
+                Foundation::{HWND, POINT},
+                UI::{Input::KeyboardAndMouse::SetCapture, WindowsAndMessaging::GetCursorPos},
+            };
+            let mut point = POINT::default();
+            unsafe {
+                if GetCursorPos(&mut point).is_err() {
+                    return;
+                }
+                SetCapture(HWND(self.hwnd() as _));
+            }
+            self.hide_tooltip();
+            self.drag = Some(PanelDrag {
+                pointer_x: point.x,
+                left,
+                original: self.position_x,
+                last_original: self.last_position_x,
+                moved: false,
+            });
+        }
+    }
+
+    pub fn move_drag(&mut self, providers: &[ProviderData]) {
+        #[cfg(windows)]
+        {
+            use windows::Win32::{
+                Foundation::POINT,
+                UI::{Input::KeyboardAndMouse::GetCapture, WindowsAndMessaging::GetCursorPos},
+            };
+            if self.drag.is_none() {
+                return;
+            }
+            if unsafe { GetCapture().0 as isize } != self.hwnd() {
+                self.cancel_drag();
+                return;
+            }
+            let Some(slot) = crate::platform::taskbar_slot(self.display) else {
+                self.cancel_drag();
+                return;
+            };
+            let scale = crate::platform::taskbar_geom::bar_scale(slot.height);
+            let mut point = POINT::default();
+            if unsafe { GetCursorPos(&mut point) }.is_err() {
+                return;
+            }
+            let drag = self.drag.as_mut().unwrap();
+            let dx = point.x - drag.pointer_x;
+            if !drag.moved && (dx as f32).abs() < 4.0 * scale {
+                return;
+            }
+            drag.moved = true;
+            let x =
+                (drag.left + dx).clamp(slot.left, (slot.right - self.size.0 as i32).max(slot.left));
+            self.position_x = Some(((x - slot.left) as f32 / scale).round() as i32);
+            self.update(providers, true);
+        }
+        #[cfg(not(windows))]
+        let _ = providers;
+    }
+
+    /// Returns the new persistent X only for a completed drag, not a click.
+    pub fn finish_drag(&mut self) -> Option<i32> {
+        let drag = self.drag.take()?;
+        self.release_capture();
+        if drag.moved {
+            self.position_x
+        } else {
+            None
+        }
+    }
+
+    pub fn cancel_drag(&mut self) {
+        if let Some(drag) = self.drag.take() {
+            self.position_x = drag.original;
+            self.last_position_x = drag.last_original;
+            self.last = None;
+            self.release_capture();
+        }
+    }
+
+    fn release_capture(&self) {
+        #[cfg(windows)]
+        unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, ReleaseCapture};
+            if GetCapture().0 as isize == self.hwnd() {
+                let _ = ReleaseCapture();
+            }
+        }
     }
 
     pub fn window_id(&self) -> WindowId {
@@ -217,6 +347,7 @@ impl TaskbarPanel {
 
     /// Apply an indicator mode change: embed + show, or hide.
     pub fn set_mode(&mut self, mode: IndicatorKind, providers: &[ProviderData]) {
+        self.cancel_drag();
         self.mode = mode;
         // A mode change is an explicit user action — start unsuppressed; the
         // next fallback evaluation re-hides if a fullscreen app is still up.
@@ -226,10 +357,12 @@ impl TaskbarPanel {
         self.suppressed = false;
         self.unavailable = false;
         if Self::is_panel_mode(mode) {
-            self.last.clear();
+            self.last = None;
             self.reposition();
             self.update(providers, true);
         } else {
+            #[cfg(target_os = "windows")]
+            crate::platform::taskbar_space::deactivate();
             self.hide();
         }
     }
@@ -240,13 +373,15 @@ impl TaskbarPanel {
             return;
         }
         self.reposition();
-        let state: Vec<Option<u8>> = providers
-            .iter()
-            .map(|d| provider_pct(d).map(|p| p.round() as u8))
-            .collect();
-        if force || state != self.last {
-            self.last = state;
+        let state = WeeklyQuota::from_providers(providers);
+        if force || self.last.as_ref() != Some(&state) {
+            self.last = Some(state);
             self.redraw(providers);
+        }
+        #[cfg(target_os = "windows")]
+        if self.tip_shown {
+            self.hide_tooltip();
+            self.show_tooltip(providers);
         }
     }
 
@@ -257,13 +392,13 @@ impl TaskbarPanel {
     pub fn show_tooltip(&mut self, providers: &[ProviderData]) {
         #[cfg(target_os = "windows")]
         {
-            if self.tip_shown || self.tip_hwnd == 0 {
+            if self.tip_shown || self.tip_hwnd == 0 || self.drag.is_some() {
                 return;
             }
             let Some((px, py, pw, _ph)) = self.rect else {
                 return;
             };
-            let text = crate::ui::tray::tooltip(providers);
+            let text = WeeklyQuota::from_providers(providers).tooltip();
             let light = crate::platform::system_uses_light_theme();
             let pm = crate::ui::tray::render_tooltip(&text, self.size.1 as f32, light);
             let (w, h) = (pm.width() as i32, pm.height() as i32);
@@ -271,7 +406,10 @@ impl TaskbarPanel {
             // own bottom edge sits `shadow` above the pixmap's — add it back or
             // the gap to the bar comes out short by that much.
             let shadow = crate::ui::tray::tip_shadow_inset(self.size.1 as f32);
-            let tx = px + (pw as i32 - w) / 2;
+            let mut tx = px + (pw as i32 - w) / 2;
+            if let Some((left, _, right, _)) = crate::platform::work_area_at(px, py) {
+                tx = tx.clamp(left, (right - w).max(left));
+            }
             let ty = py - crate::ui::tray::TIP_GAP - h + shadow;
             let bgra = pixmap_to_bgra(&pm);
             let _ = crate::platform::present_layered(self.tip_hwnd, &bgra, tx, ty, w, h);
@@ -348,7 +486,7 @@ impl TaskbarPanel {
     pub fn restart(&mut self, providers: &[ProviderData]) {
         self.suppressed = false;
         self.unavailable = false;
-        self.last.clear();
+        self.last = None;
         if !Self::is_panel_mode(self.mode) {
             self.hide();
             return;
@@ -391,18 +529,17 @@ impl TaskbarPanel {
         self.redraw(providers);
     }
 
-    /// The overlay size: a two-row width and a height fit to the taskbar,
-    /// both scaled by the taskbar's DPI so digits stay clock-sized.
+    /// Ring and number width, scaled with the taskbar height.
     fn desired_size(&self, slot_h: i32) -> (u32, u32) {
         let scale = (slot_h as f32 / 48.0).clamp(1.0, 3.0);
-        // Full taskbar height: the two rows must hold clock-sized digits, so
-        // the panel needs the same vertical room the clock's two lines use.
+        // Use the taskbar height for vertical centering.
         let h = slot_h.max(1) as u32;
-        let w = ((PAD_X * 2.0 + NUM_W + NUM_GAP + BAR_W) * scale).round() as u32;
+        let w = (self.content_width * scale).ceil() as u32;
         (w, h)
     }
 
     fn hide(&mut self) {
+        self.cancel_drag();
         self.hide_tooltip();
         #[cfg(target_os = "windows")]
         crate::platform::hide_window(self.hwnd());
@@ -465,7 +602,6 @@ impl TaskbarPanel {
                 self.hide();
                 return;
             }
-            self.unavailable = false;
             let (w, h) = self.desired_size(slot.height);
             // An estimated tray edge is a guess at where the clock starts, so
             // keep a little more air than when the edge was measured.
@@ -474,18 +610,53 @@ impl TaskbarPanel {
             } else {
                 TRAY_MARGIN * 2
             };
-            let x = slot.tray_left - w as i32 - margin;
+            let scale = crate::platform::taskbar_geom::bar_scale(slot.height);
+            let preferred = slot.tray_left - w as i32 - margin + self.offset.0;
+            let safe = if self.position_x.is_none() {
+                crate::platform::taskbar_space::occupied(
+                    slot.hwnd,
+                    (slot.left, slot.top, slot.right, slot.top + slot.height),
+                )
+                .and_then(|mut occupied| {
+                    occupied.push((slot.tray_left, slot.right));
+                    crate::platform::taskbar_geom::free_panel_x(
+                        slot.left,
+                        slot.tray_left,
+                        w as i32,
+                        preferred,
+                        (6.0 * scale).round() as i32,
+                        &occupied,
+                    )
+                })
+            } else {
+                crate::platform::taskbar_space::deactivate();
+                None
+            };
+            let x = crate::platform::taskbar_geom::panel_x(
+                slot.left,
+                slot.right,
+                w as i32,
+                scale,
+                self.position_x,
+                self.last_position_x,
+                safe,
+                preferred,
+            );
+            self.last_position_x = Some(((x - slot.left) as f32 / scale).round() as i32);
+            if self.locked && self.position_x.is_none() {
+                self.position_x = self.last_position_x;
+            }
+            self.unavailable = false;
             let y = slot.top + (slot.height - h as i32) / 2;
             if self.size != (w, h) {
                 self.resize_pixmap(w, h);
-                self.last.clear();
+                self.last = None;
             }
             // Re-presenting is needed when reappearing after a hide.
             if self.rect.is_none() {
-                self.last.clear();
+                self.last = None;
             }
-            let x = x + self.offset.0;
-            let y = y + self.offset.1;
+            let y = (y + self.offset.1).clamp(slot.top, slot.top + slot.height - h as i32);
             if before.map(|(bx, _, _, _)| bx) != Some(x) {
                 tracing::debug!(
                     "panel placed at {x},{y} (target {:?}, bar top {}, tray_left {}, measured {})",
@@ -500,7 +671,7 @@ impl TaskbarPanel {
     }
 
     /// Paint (near-transparent background) and present via UpdateLayeredWindow:
-    /// monochrome, system-theme-aware, two clock-sized "percent + bar" rows.
+    /// theme-aware activity ring and adjacent remaining percentage.
     pub fn redraw(&mut self, providers: &[ProviderData]) {
         if !Self::is_panel_mode(self.mode) {
             return;
@@ -508,53 +679,13 @@ impl TaskbarPanel {
         let Some((x, y, w, h)) = self.rect else {
             return;
         };
-        let (fg, track) = theme_ink(crate::platform::system_uses_light_theme());
-        let (fw, fh) = (w as f32, h as f32);
-        let pm = &mut self.pixmap;
-        // A per-pixel-alpha layered window passes mouse clicks THROUGH any
-        // fully transparent (alpha 0) pixel to the window beneath — here the
-        // taskbar — so a right-click on the gaps between the digits/bars used
-        // to open the taskbar's own menu instead of ours, and hover never
-        // reached the panel. Fill with a 1/255 alpha so every pixel of the
-        // window catches the cursor (clicks + the hover tooltip) while staying
-        // visually transparent (≈0.4% — imperceptible over the bar).
-        pm.fill(color(0, 0, 0, HIT_ALPHA));
-
-        let top = first_two(providers);
-        // Digit ink height matched to the taskbar clock: the user tuned it to
-        // Segoe UI 13px (== 9px ink), which is 0.225 of this taskbar's height.
-        // draw_digits_fit fits the ink to digit_h, so digit_h IS the ink
-        // height and stays constant regardless of the row count. The tight
-        // centered block mirrors the clock's time-over-date stack.
-        let n = top.len().max(1) as f32;
-        let digit_h = fh * 0.225;
-        let row_gap = digit_h * 0.40;
-        let bar_h = digit_h * 0.50;
-        let block_h = n * digit_h + (n - 1.0) * row_gap;
-        let top0 = (fh - block_h) / 2.0;
-        let pad_x = fw * 0.06;
-        let num_w = fw * 0.30;
-        let num_gap = fw * 0.05;
-        let bx = pad_x + num_w + num_gap;
-        let bar_w = fw - bx - pad_x;
-
-        for (i, data) in top.iter().enumerate() {
-            let cy = top0 + digit_h / 2.0 + i as f32 * (digit_h + row_gap);
-            let label = match provider_pct(data) {
-                Some(p) => format!("{}%", p.round().clamp(0.0, 100.0) as u32),
-                None => "—".to_string(),
-            };
-            draw_digits_fit(pm, &label, pad_x, cy - digit_h / 2.0, num_w, digit_h, fg);
-            let by = cy - bar_h / 2.0;
-            let rad = bar_h / 2.0;
-            fill_round_rect(pm, bx, by, bar_w, bar_h, rad, track);
-            if let Some(p) = provider_pct(data) {
-                let frac = (p / 100.0).clamp(0.0, 1.0);
-                // Keep a sliver visible at low usage so the bar never looks absent.
-                let fwid = (bar_w * frac).max(bar_h);
-                fill_round_rect(pm, bx, by, fwid, bar_h, rad, fg);
-            }
-        }
+        self.pixmap = render_styled_panel(
+            w,
+            h,
+            &WeeklyQuota::from_providers(providers),
+            crate::platform::system_uses_light_theme(),
+            &self.appearance,
+        );
 
         // Premultiplied RGBA (tiny-skia) → premultiplied BGRA (top-down) for
         // UpdateLayeredWindow.
@@ -585,5 +716,261 @@ impl TaskbarPanel {
         {
             let _ = (&bgra, x, y);
         }
+    }
+}
+
+/// Shared by the live panel and render verification; no window is needed.
+#[cfg(test)]
+fn render_panel(w: u32, h: u32, quota: &WeeklyQuota, light: bool) -> Pixmap {
+    render_styled_panel(w, h, quota, light, &Appearance::default())
+}
+
+pub(crate) fn appearance_width(style: &Appearance) -> f32 {
+    (style.ring_x as f32 + style.ring_size as f32)
+        .max(style.number_x as f32 + crate::ui::numbers::width(style, 1.0))
+        + 8.0
+}
+
+pub(crate) fn render_styled_panel(
+    w: u32,
+    h: u32,
+    quota: &WeeklyQuota,
+    light: bool,
+    style: &Appearance,
+) -> Pixmap {
+    let mut pm = Pixmap::new(w, h).expect("panel dimensions");
+    pm.fill(color(0, 0, 0, HIT_ALPHA));
+    let scale = (h as f32 / 48.0).clamp(1.0, 3.0);
+    let side = (style.ring_size as f32 * scale).round() as u32;
+    let mut ring = Pixmap::new(side, side).expect("ring dimensions");
+    paint_styled_ring(&mut ring, quota, light, style);
+    pm.draw_pixmap(
+        (style.ring_x as f32 * scale).round() as i32,
+        ((h as i32 - side as i32) / 2 + (style.ring_y as f32 * scale).round() as i32)
+            .clamp(0, (h as i32 - side as i32).max(0)),
+        ring.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    let ink = if quota.muted() {
+        if light {
+            color(112, 112, 120, 255)
+        } else {
+            color(158, 158, 168, 255)
+        }
+    } else {
+        crate::config::appearance::rgb(&style.number_color)
+            .map(|[r, g, b]| color(r, g, b, 255))
+            .unwrap_or_else(|| theme_ink(light).0)
+    };
+    let x = style.number_x as f32 * scale;
+    crate::ui::numbers::draw(&mut pm, quota, x, scale, ink, style);
+    pm
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn customized_numbers_fit_all_readings_weights_and_scales() {
+        use crate::config::appearance::NumberWeight;
+        for weight in [
+            NumberWeight::Regular,
+            NumberWeight::Semibold,
+            NumberWeight::Bold,
+        ] {
+            for size in [10, 20, 40] {
+                let style = Appearance {
+                    number_weight: weight,
+                    number_size: size,
+                    number_x: 65,
+                    ring_x: 0,
+                    ring_size: 44,
+                    ring_thickness: 12,
+                    number_y: 20,
+                    ring_y: -20,
+                    symbol_percent: 100,
+                    ..Default::default()
+                };
+                for scale in [1.0, 1.5, 2.0] {
+                    let width = (appearance_width(&style) * scale).ceil() as u32;
+                    let height = (48.0 * scale) as u32;
+                    for remaining in [
+                        None,
+                        Some(0.0),
+                        Some(1.0),
+                        Some(68.0),
+                        Some(88.0),
+                        Some(100.0),
+                    ] {
+                        let mut quota = WeeklyQuota::from_providers(&[]);
+                        quota.remaining = remaining;
+                        quota.estimated = true;
+                        let rendered = render_styled_panel(width, height, &quota, false, &style);
+                        // No ink reaches the outer right or bottom edge, even with
+                        // the largest symbols, estimated values and vertical offset.
+                        assert!((0..height)
+                            .all(|y| rendered.pixel(width - 1, y).unwrap().alpha() == HIT_ALPHA));
+                        assert!(
+                            (0..width).all(
+                                |x| rendered.pixel(x, height - 1).unwrap().alpha() == HIT_ALPHA
+                            ),
+                            "bottom clipping: {weight:?}, {size}, {scale}, {remaining:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn independent_colors_and_muted_state_do_not_modify_quota() {
+        let quota = WeeklyQuota::from_providers(&[crate::ui::weekly::tests::data(32)]);
+        let original = quota.clone();
+        let style = Appearance {
+            ring_color: "#00FF00".into(),
+            number_color: "#FF0000".into(),
+            ..Default::default()
+        };
+        let w = appearance_width(&style).ceil() as u32;
+        for light in [false, true] {
+            let rendered = render_styled_panel(w, 48, &quota, light, &style);
+            assert!(rendered
+                .pixels()
+                .iter()
+                .any(|p| p.alpha() > 240 && p.green() > 240 && p.red() < 5));
+            assert!(rendered
+                .pixels()
+                .iter()
+                .any(|p| p.alpha() > 240 && p.red() > 240 && p.green() < 5));
+            let mut stale = quota.clone();
+            stale.stale = true;
+            let muted = render_styled_panel(w, 48, &stale, light, &style);
+            assert!(muted
+                .pixels()
+                .iter()
+                .filter(|p| p.alpha() > 200)
+                .all(|p| (p.red() as i32 - p.green() as i32).abs() < 3));
+        }
+        assert_eq!(quota, original);
+    }
+
+    #[test]
+    fn ring_boundaries_and_number_spacing() {
+        for scale in [1.0, 1.5, 2.0] {
+            let w = ((PAD_X * 2.0 + RING_SIZE + NUM_GAP + NUM_W) * scale) as u32;
+            let h = (48.0 * scale) as u32;
+            for light in [false, true] {
+                let empty = WeeklyQuota::from_providers(&[crate::ui::weekly::tests::data(100)]);
+                let full = WeeklyQuota::from_providers(&[crate::ui::weekly::tests::data(0)]);
+                let unknown = WeeklyQuota::from_providers(&[]);
+                let zero = render_panel(w, h, &empty, light);
+                let full = render_panel(w, h, &full, light);
+                let unknown = render_panel(w, h, &unknown, light);
+                let ring_end = ((PAD_X + RING_SIZE) * scale) as u32;
+                let text_start = ((PAD_X + RING_SIZE + NUM_GAP) * scale) as u32;
+                for y in 0..h {
+                    for x in 0..ring_end {
+                        assert_eq!(
+                            zero.pixel(x, y).unwrap().alpha() > HIT_ALPHA,
+                            unknown.pixel(x, y).unwrap().alpha() > HIT_ALPHA,
+                            "0% must only draw the track"
+                        );
+                    }
+                    for x in ring_end..text_start {
+                        assert_eq!(
+                            full.pixel(x, y).unwrap().alpha(),
+                            HIT_ALPHA,
+                            "ring and digits must remain separated"
+                        );
+                    }
+                }
+                let solid = |pm: &Pixmap| {
+                    (0..h)
+                        .flat_map(|y| (0..ring_end).map(move |x| (x, y)))
+                        .filter(|(x, y)| pm.pixel(*x, *y).unwrap().alpha() > 200)
+                        .count()
+                };
+                assert_eq!(solid(&zero), 0);
+                assert!(solid(&full) > (100.0 * scale * scale) as usize);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "writes visual review sheets; run in isolation because language is process-global"]
+    fn preview_weekly_ring() {
+        use crate::config::schema::Language;
+        use crate::ui::tray::render_tooltip;
+        let dir = std::path::Path::new("target/weekly-preview");
+        std::fs::create_dir_all(dir).unwrap();
+        for (language, code) in [(Language::Chinese, "zh-CN"), (Language::English, "en")] {
+            crate::i18n::set_language(language);
+            for (percent, scale) in [(100, 1.0), (150, 1.5), (200, 2.0)] {
+                let mut sheet = Pixmap::new(1400, 1320).unwrap();
+                for (col, light) in [true, false].into_iter().enumerate() {
+                    let bg = if light {
+                        color(242, 242, 246, 255)
+                    } else {
+                        color(28, 28, 32, 255)
+                    };
+                    crate::ui::tray::fill_round_rect(
+                        &mut sheet,
+                        col as f32 * 700.0,
+                        0.0,
+                        700.0,
+                        1320.0,
+                        0.0,
+                        bg,
+                    );
+                    let mut states: Vec<_> = [32, 0, 100, 99]
+                        .into_iter()
+                        .map(|used| {
+                            WeeklyQuota::from_providers(&[crate::ui::weekly::tests::data(used)])
+                        })
+                        .collect();
+                    let mut stale = states[0].clone();
+                    stale.stale = true;
+                    stale.status = "Cached quota (outdated)";
+                    states.push(stale);
+                    let mut estimated = states[1].clone();
+                    estimated.estimated = true;
+                    estimated.status = "Estimated quota";
+                    states.push(estimated);
+                    states.push(WeeklyQuota::from_providers(&[]));
+                    for (row, state) in states.into_iter().enumerate() {
+                        let x = col as i32 * 700 + 25;
+                        let y = row as i32 * 185 + 15;
+                        let panel = render_panel(
+                            ((PAD_X * 2.0 + RING_SIZE + NUM_GAP + NUM_W) * scale) as u32,
+                            (48.0 * scale) as u32,
+                            &state,
+                            light,
+                        );
+                        sheet.draw_pixmap(
+                            x,
+                            y,
+                            panel.as_ref(),
+                            &tiny_skia::PixmapPaint::default(),
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                        // Tooltip gets its own row across the full sheet width in separate artifacts.
+                        let tooltip = render_tooltip(&state.tooltip(), 48.0 * scale, light);
+                        tooltip
+                            .save_png(
+                                dir.join(format!("{code}-{percent}-{light}-{row}-tooltip.png")),
+                            )
+                            .unwrap();
+                    }
+                }
+                sheet
+                    .save_png(dir.join(format!("{code}-{percent}.png")))
+                    .unwrap();
+            }
+        }
+        crate::i18n::set_language(Language::Auto);
     }
 }

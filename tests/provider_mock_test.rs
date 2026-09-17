@@ -203,7 +203,7 @@ fn hover_reason_explains_stale_rows_only() {
     use ailimits::providers::{
         Metric, MetricUnit, MetricWindow, ProviderData, ProviderId, ProviderStatus,
     };
-    use ailimits::ui::renderer::hover_reason;
+    use ailimits::ui::text::hover_reason;
     use chrono::{Duration, Utc};
     use std::collections::HashMap;
 
@@ -223,10 +223,13 @@ fn hover_reason_explains_stale_rows_only() {
     };
 
     let mut errors = HashMap::new();
-    errors.insert(ProviderId::Claude, "token expired".to_string());
+    errors.insert(
+        ProviderId::Claude,
+        ProviderStatus::AuthError("token expired".to_string()),
+    );
     errors.insert(
         ProviderId::Codex,
-        "token expired — run Codex CLI once".to_string(),
+        ProviderStatus::AuthError("token expired".to_string()),
     );
 
     // Stored cause + appended per-provider action.
@@ -234,15 +237,32 @@ fn hover_reason_explains_stale_rows_only() {
         hover_reason(&stale(ProviderId::Claude), &errors).as_deref(),
         Some("token expired — run Claude Code")
     );
-    // A message that already carries its action is shown verbatim.
+    // Actions are selected by status category, independent of message wording.
     assert_eq!(
         hover_reason(&stale(ProviderId::Codex), &errors).as_deref(),
-        Some("token expired — run Codex CLI once")
+        Some("token expired — run Codex CLI")
     );
     // No stored error (e.g. cache-loaded after a restart) → generic cause.
     assert_eq!(
         hover_reason(&stale(ProviderId::Antigravity), &errors).as_deref(),
-        Some("no fresh data — run Antigravity")
+        Some("no fresh data")
+    );
+
+    errors.insert(
+        ProviderId::Claude,
+        ProviderStatus::NetworkError("rate-limited, retrying".into()),
+    );
+    assert_eq!(
+        hover_reason(&stale(ProviderId::Claude), &errors).as_deref(),
+        Some("rate-limited, retrying")
+    );
+    errors.insert(
+        ProviderId::Claude,
+        ProviderStatus::NetworkError("run is just part of a server error".into()),
+    );
+    assert_eq!(
+        hover_reason(&stale(ProviderId::Claude), &errors).as_deref(),
+        Some("run is just part of a server error")
     );
 
     // Fresh data → no reason; hover keeps its weekly-metric meaning.
@@ -663,6 +683,39 @@ fn codex_marks_the_secondary_window_as_long() {
     assert_eq!(metrics.len(), 2);
     assert_eq!(metrics[0].window, MetricWindow::Session);
     assert_eq!(metrics[1].window, MetricWindow::Long);
+}
+
+#[test]
+fn codex_classifies_duration_before_window_position() {
+    use ailimits::providers::codex::parse_wham_usage;
+    for (primary, secondary, expected) in [
+        (18000, 604800, MetricWindow::Session),
+        (604800, 18000, MetricWindow::Long),
+    ] {
+        let response = serde_json::json!({"rate_limit":{
+            "primary_window":{"used_percent":27,"limit_window_seconds":primary},
+            "secondary_window":{"used_percent":12,"limit_window_seconds":secondary}
+        }});
+        let metrics = parse_wham_usage(&response.to_string()).unwrap();
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(metrics[0].window, expected);
+        assert_ne!(metrics[0].window, metrics[1].window);
+        let weekly = metrics
+            .iter()
+            .find(|m| m.window == MetricWindow::Long)
+            .unwrap();
+        assert_eq!(weekly.label, "Weekly");
+    }
+    for duration in [
+        serde_json::Value::Null,
+        serde_json::json!(0),
+        serde_json::json!(-1),
+        serde_json::json!(3600),
+        serde_json::json!("604800"),
+    ] {
+        let response = serde_json::json!({"rate_limit":{"secondary_window":{"used_percent":27,"limit_window_seconds":duration}}});
+        assert!(parse_wham_usage(&response.to_string()).unwrap().is_empty());
+    }
 }
 
 #[test]
