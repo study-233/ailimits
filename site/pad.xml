@@ -13,7 +13,7 @@
     <State_Province></State_Province>
     <Zip_Postal_Code></Zip_Postal_Code>
     <Country>Ukraine</Country>
-    <Company_WebSite_URL>https://napxlexn.github.io/ailimits/</Company_WebSite_URL>
+    <Company_WebSite_URL>https://study-233.github.io/ailimits/</Company_WebSite_URL>
     <Contact_Info>
       <Author_First_Name>Vasyl</Author_First_Name>
       <Author_Last_Name>Hleba</Author_Last_Name>
@@ -85,11 +85,11 @@ Three detail levels, several layouts, nine palettes; opacity, brightness and sat
   </Program_Descriptions>
   <Web_Info>
     <Application_URLs>
-      <Application_Info_URL>https://napxlexn.github.io/ailimits/</Application_Info_URL>
+      <Application_Info_URL>https://study-233.github.io/ailimits/</Application_Info_URL>
       <Application_Order_URL></Application_Order_URL>
-      <Application_Screenshot_URL>https://napxlexn.github.io/ailimits/media/og.png</Application_Screenshot_URL>
-      <Application_Icon_URL>https://napxlexn.github.io/ailimits/media/favicon.png</Application_Icon_URL>
-      <Application_XML_File_URL>https://napxlexn.github.io/ailimits/pad.xml</Application_XML_File_URL>
+      <Application_Screenshot_URL>https://study-233.github.io/ailimits/media/og.png</Application_Screenshot_URL>
+      <Application_Icon_URL>https://study-233.github.io/ailimits/media/favicon.png</Application_Icon_URL>
+      <Application_XML_File_URL>https://study-233.github.io/ailimits/pad.xml</Application_XML_File_URL>
     </Application_URLs>
     <Download_URLs>
       <Primary_Download_URL>https://github.com/napxlexn/ailimits/releases/download/v0.6.4/AiLimits-Portable-0.6.4.zip</Primary_Download_URL>
