@@ -1,82 +1,84 @@
 # QuotaBar
 
-**Codex quota, at a glance.** A lightweight native Windows 11 taskbar tool with colorful rings or progress bars for weekly and 5-hour remaining quota.
+**把 Codex 余量放在任务栏上。** 轻量级 Windows 11 原生工具，用彩色圆环或横条查看每周与 5 小时剩余额度。
 
-[简体中文](README.zh-CN.md) · [Download](https://github.com/study-233/ailimits/releases/latest) · [Configuration](docs/en/CONFIG.md) · [Changelog](CHANGELOG.md)
+[English](README.en.md) · [下载](https://github.com/study-233/ailimits/releases/latest) · [配置说明](docs/en/CONFIG.md) · [更新记录](CHANGELOG.md)
 
-![QuotaBar rings and bars in light and dark themes](docs/images/fluent-quota-styles.png)
+![QuotaBar 圆环与横条的深浅主题预览](docs/images/fluent-quota-styles.png)
 
-*Samples from the actual renderer, using demonstration values. Left: light theme; right: dark theme. Each style shows weekly, 5-hour and both-period variants.*
+*由实际绘制代码生成的示例：左侧浅色、右侧深色；依次为每周、5 小时和双周期的圆环／横条。数值为演示数据。*
 
-## Small surface, useful choices
+## 简洁，也可自定义
 
-- **Rings or bars.** Dual rings use the outer ring for 5 hours and the inner ring for the week.
-- **Weekly, 5-hour or both.** `5h` means 5 hours; `7d` means weekly. A single weekly ring is the default.
-- **At home on the taskbar.** Theme-aware, DPI-aware, follows auto-hide and full-screen visibility; drag and lock its position.
-- **Synchronized tray and taskbar.** Both follow the selected shape, periods and colors; the tray also offers compact numbers and status markers.
-- **Click for details.** The popup independently shows five modules: 5-hour quota, weekly quota, reset opportunities, quota history and Token activity. Select visibility and reorder modules in Settings. Click again, click outside or press Esc to close. No hover tooltips.
-- **Native preferences.** Separate Taskbar appearance and Panel content pages. Drag handles or use up/down buttons, preview, restore defaults, save or cancel. Hidden modules retain their positions.
-- **Lightweight architecture.** Rust, Win32 and CPU vector drawing. No WebView, bundled fonts or continuous animation. Both periods reuse existing quota requests.
-- **Independent alerts and diagnostics.** In More, set separate 5-hour/weekly used-quota thresholds, inspect failures and copy a report without credentials or account identifiers.
-- **English and Simplified Chinese**, with live Windows static-proxy support and a direct-connection option.
+- **圆环 / 横条**：一键切换；双圆环外圈为 5 小时，内圈为每周。
+- **每周 / 5 小时 / 同时显示**：按需要选择。`5h` 表示 5 小时，`7d` 表示每周。默认只显示每周圆环。
+- **跟随 Windows**：支持深浅任务栏、DPI 缩放、自动隐藏和全屏隐藏；可拖动、锁定位置。
+- **托盘与任务栏同步**：共享样式、周期和颜色；托盘还可选择紧凑数字和状态标记。
+- **点击查看详情**：左键打开完整配额面板，默认显示 5 小时、每周、重置机会、额度历史和 Token 活动。面板模块独立于任务栏，可分别开关和排序。再次点击、点击外部或按 Esc 关闭，不再显示悬停提示。
+- **原生设置**：分为“任务栏外观”和“面板内容”。拖动手柄或使用上下按钮排列模块，实时预览，保存生效，取消回滚。隐藏模块保留位置，历史继续记录。
+- **保持轻量**：Rust + Win32 + CPU 矢量绘制，无 WebView、无字体下载、无持续动画；复用现有额度请求。
+- **独立提醒与诊断**：在“更多”中分别设置 5 小时／每周已用额度提醒阈值，查看失败原因并复制脱敏诊断报告。
+- **中英文界面**：跟随系统或手动切换；支持 Windows 静态系统代理和直连。
 
-![Native quota details with demonstration data](docs/images/quota-popover-zh-dark.png)
+## 下载与安装
 
-## Download
+从 [Releases](https://github.com/study-233/ailimits/releases/latest) 下载 Windows 11 x64 构建：
 
-Choose Windows 11 x64 assets from [Releases](https://github.com/study-233/ailimits/releases/latest):
-
-| Asset | Use |
+| 文件 | 用途 |
 | --- | --- |
-| `QuotaBar-Setup-<version>.exe` | Per-user installation with automatic updates |
-| `QuotaBar-Portable-<version>.zip` | Extract and run `ailimits.exe`; update manually |
-| `SHA256SUMS.txt` | Verify with `Get-FileHash <file> -Algorithm SHA256` |
+| `QuotaBar-Setup-<版本>.exe` | 推荐，当前用户安装，支持应用内自动更新 |
+| `QuotaBar-Portable-<版本>.zip` | 解压后运行 `ailimits.exe`，后续手动更新 |
+| `SHA256SUMS.txt` | 使用 `Get-FileHash <文件> -Algorithm SHA256` 校验 |
 
-The v0.2.0 build uses QuotaBar asset names. Public availability follows the releases actually published. This distribution is not published to winget, Scoop, Chocolatey or Microsoft Store.
+v0.4.0 的构建产物采用 QuotaBar 名称；公开下载以 Releases 中实际发布的版本为准。此仓库未发布到 winget、Scoop、Chocolatey 或 Microsoft Store。
 
-Install over v0.1.0 to update the Windows app name to **QuotaBar** and remove old shortcuts. Configuration, credentials, position and the installation identity remain compatible. The executable stays `ailimits.exe`; configuration stays in `%APPDATA%\AiLimits\config.toml`. Older `0.6.4` development builds require a first manual upgrade.
+从 v0.1.0 覆盖安装后，Windows 应用列表将显示 **QuotaBar**。原有配置、凭据和位置继续保留，旧名称快捷方式会清理。程序内部文件名仍为 `ailimits.exe`，配置仍在 `%APPDATA%\AiLimits\config.toml`。旧 `0.6.4` 开发版本需首次手动升级。
 
-The bootstrap installer also verifies the download before installation:
+也可使用下载并验证安装器的脚本：
 
 ```powershell
 irm https://raw.githubusercontent.com/study-233/ailimits/master/install.ps1 | iex
 ```
 
-## Get started
+## 三步开始
 
-1. Sign in with the official Codex CLI, then launch `ailimits.exe`.
-2. Right-click the taskbar → **Appearance settings…**. Choose the taskbar style or open **Panel content** to select and arrange modules.
-3. **Save** to keep the changes. Edits preview immediately; **Cancel** or closing restores the previous appearance.
+1. 在官方 Codex CLI 中登录账号，然后启动 `ailimits.exe`。
+2. 右键任务栏 → **外观设置…**，在“任务栏外观”选择样式；在“面板内容”选择显示模块并排序。
+3. 点击**保存**。修改会实时预览，取消或关闭窗口会恢复之前的外观。
 
-![Native panel configuration, Chinese UI](docs/images/panel-settings-zh.png)
+![QuotaBar 点击配额面板](docs/images/quota-popover-zh-dark.png)
 
-Drag horizontally to position the panel; Esc cancels a drag. **Lock position** prevents movement. **Restore automatic position** finds free space again. A crowded taskbar never switches to tray automatically; choose the tray explicitly from the menu.
+*原生绘制的演示数据。面板模块独立配置，长内容滚动；点击图表打开周期详情。*
 
-Quota history records real local observations per account for 30 days, including while hidden. It never backfills quota observations before installation. Token dates come from the service; missing dates differ from zero. Click charts for current-cycle / 7-day / 30-day quota views and 7-day / 30-day Token views; point at samples for dates and values.
+![QuotaBar 原生面板设置](docs/images/panel-settings-zh.png)
 
-Only enabled extension modules refresh on opening when their cache is older than five minutes. Manual refresh also updates base quota. The local Codex App Server exits after reading; a 25-second deadline and a Windows job object clean up the process tree. Unavailable methods, missing Codex and account mismatches are shown explicitly. Reset opportunities are read-only.
+拖动面板可调整水平位置；Esc 取消拖动。“锁定位置”禁止移动，“恢复自动位置”重新寻找空白区域。任务栏拥挤时不会自动切换为托盘，可从菜单手动选择托盘图标。
 
-## Questions
+额度历史从本程序实际观测开始，按账号隔离保留最近 30 天；隐藏模块不会停止记录。Token 使用接口返回的每日数据，缺失日期不计为零。点击额度图可选当前周期、近 7 天、近 30 天；Token 图可选近 7 天、近 30 天，指向数据点查看日期和数值。
 
-**Used or remaining?** Always remaining: 100% fills the ring/bar; 0% leaves only the track.
+扩展模块仅在打开面板且缓存超过 5 分钟时读取；手动刷新同时更新基础额度与已启用的扩展模块。读取结束或 25 秒超时后退出辅助进程并清理其子进程。未安装 Codex、接口不支持或账号无法匹配时保留明确的不可用状态。重置机会仅供查看，不会消耗次数。
 
-**Does this display the Plus 5-hour window?** It displays the 5-hour window returned for your account without a hardcoded plan-name restriction. A missing window shows `—`; another period never substitutes for it.
+## 常见问题
 
-**Pro quota details?** All plans use the independent five-module popup layout. Taskbar and tray hover tips have been removed.
+**数字表示已用还是剩余？** 统一表示剩余。100% 为满环／满条，0% 只保留底轨。
 
-**Why grey or `≈`?** Missing, stale or estimated data is muted. Estimates carry `≈`. Click for period, status and reset time in your local time zone. A reset timestamp passing alone does not confirm a fresh quota.
+**Plus 的 5 小时额度能显示吗？** 可以读取账号接口返回的 5 小时周期，不按套餐名称限制；没有该周期时显示 `—`，不会拿每周额度代替。
 
-**Why did the installed name contain “fork”?** The old installer embedded that name. v0.2.0 uses the independent QuotaBar name; an in-place installation updates the displayed name.
+**Pro 的详情显示什么？** 所有套餐默认显示完整的五个模块，可在“面板内容”独立选择显示内容及顺序。任务栏和托盘不显示悬停提示。
 
-**Does it modify CLI tokens?** Base quota reads do not refresh or rotate CLI tokens. Optional extension reads use the official Codex App Server, which manages its own authentication; QuotaBar never starts login, logout or model turns. Manually entered secrets use Windows Credential Manager.
+**灰色或 `≈` 是什么？** 灰色表示缺失、过期或估算状态，`≈` 表示估算。左键点击查看周期、状态和本地重置时间。仅凭重置时间已过，不能确认额度已恢复。
 
-**Other providers?** Existing Claude, Copilot and Antigravity integrations remain available. The panel and tray presentation in this version focuses on Codex.
+**为什么旧版有 fork？** 旧安装器把它写进了应用名称。v0.4.0 改用独立名称 QuotaBar，覆盖安装即可更新显示名称。
 
-See [configuration and authentication](docs/en/CONFIG.md) for proxy rules and advanced options.
+**会修改 CLI 令牌吗？** 基础额度请求只读现有令牌。重置机会和每日 Token 按需调用本机官方 Codex App Server，由官方 CLI 管理自身认证；QuotaBar 不发起登录、登出或模型对话。手动设置的密钥仍存储在 Windows 凭据管理器。
 
-## Build
+**其他服务商呢？** 保留 Claude、Copilot、Antigravity 的现有接入能力；本轮任务栏和托盘的额度显示聚焦 Codex。
 
-Use Windows, Rust's MSVC toolchain and Visual Studio C++ Build Tools with the Windows SDK.
+代理规则、认证命令和配置路径见[配置与网络](docs/zh-CN/CONFIG.md)。
+
+## 从源码构建
+
+需要 Windows、Rust MSVC 工具链、Visual Studio C++ Build Tools 和 Windows SDK。
 
 ```powershell
 cargo +stable-x86_64-pc-windows-msvc fmt --all -- --check
@@ -85,16 +87,16 @@ cargo +stable-x86_64-pc-windows-msvc test --locked
 cargo +stable-x86_64-pc-windows-msvc build --locked --profile release-min --bins
 ```
 
-Binaries are written to `target/release-min/`. Package them with Inno Setup 6:
+产物位于 `target/release-min/`。使用 Inno Setup 6 构建安装器：
 
 ```powershell
-./tools/package-release.ps1 -Version 0.4.0 -Iscc 'C:\path\to\ISCC.exe'
+./tools/package-release.ps1 -Version 0.4.0 -Iscc 'C:\路径\ISCC.exe'
 ```
 
-Network tests use local mock servers, without real tokens. See [validation](docs/en/VALIDATION.md) for rendering and native preferences checks. Release automation creates a draft for review; it does not replace an already-published release.
+网络测试只使用本地模拟服务，不依赖真实令牌。渲染预览与原生设置验证说明见[开发验证](docs/en/VALIDATION.md)。
 
-## Attribution and license
+## 致谢与许可
 
-Based on [napxlexn/ailimits](https://github.com/napxlexn/ailimits), independently maintained by study-233. Original code Copyright (C) 2026 napxlexn; modifications by study-233.
+基于 [napxlexn/ailimits](https://github.com/napxlexn/ailimits)，由 study-233 独立维护。原始代码 Copyright (C) 2026 napxlexn，修改部分由 study-233 维护。
 
-Licensed under [GPL-3.0-or-later](LICENSE). Original attribution and the [upstream name/logo policy](TRADEMARKS.md) are preserved. QuotaBar uses its own name and original icon and is not an official upstream or OpenAI product.
+遵循 [GPL-3.0-or-later](LICENSE)。保留上游署名和[名称及标志说明](TRADEMARKS.md)；QuotaBar 使用独立名称和原创图标，不代表上游或 OpenAI 官方产品。
