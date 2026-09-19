@@ -1,10 +1,5 @@
-/* AI Limits site v2.2 — dense, authentic, layered.
-   The page is built from acrylic surfaces over a deep base; the cursor light
-   lives UNDER the glass (.underlight), so every pane diffuses it, and a
-   full-page grain overlay dithers every gradient (no banding).
-   The widget replica (.aw) is painted by site.js from the app's renderer
-   constants and carries NOTHING the real window does not have: no shadow,
-   no rim, no sheen. The site may glow; the widget must be true. */
+/* QuotaBar site — adapted from the AI Limits site by napxlexn.
+   Native renderer screenshots sit on the original glass-and-wallpaper layout. */
 
 :root {
   --bg-0: #0a0c0e;
@@ -805,4 +800,42 @@ footer a { color: var(--ink-2); }
   .fx-tokens { display: none; }
   .shape { height: auto; }
   .pin { position: static; height: auto; padding: 12vh 30px; }
+}
+
+
+/* Current QuotaBar content uses native screenshots in the original glass layout. */
+.quotabar-site section[id] { scroll-margin-top: 80px; }
+.product-section { max-width: 1240px; margin: 0 auto; padding: 10vh 30px; }
+.product-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 54px; align-items: center; }
+.product-grid > div > p + p { margin-top: 18px; }
+.product-shot { min-width: 0; margin: 0; }
+.product-shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.product-shot figcaption { margin-top: 16px; color: var(--ink-2); font-size: 0.86rem; line-height: 1.5; }
+.panel-shot { max-width: 460px; justify-self: center; }
+.install-intro { margin: 22px auto 0; }
+.quotabar-site .install-command { margin-top: 16px; max-width: 100%; }
+.quotabar-site .install-command code { white-space: normal; overflow-wrap: anywhere; }
+.quotabar-site .pane { will-change: auto; }
+.quotabar-site .dl-meta { overflow-wrap: anywhere; }
+.quotabar-site .doc { position: relative; z-index: 3; max-width: 48em; margin: 0 auto; padding: 120px 30px 80px; }
+.doc h1 { font: 700 clamp(1.9rem, 4vw, 2.6rem)/1.1 var(--font-display); color: var(--ink); letter-spacing: -0.015em; }
+.doc h2 { font: 600 1.15rem/1.3 var(--font-display); color: var(--ink); margin: 40px 0 10px; }
+.doc p, .doc li { font-size: 1rem; line-height: 1.66; color: var(--ink-2); }
+.doc p { margin: 12px 0; }
+.doc ul { margin: 10px 0 10px 1.2em; }
+.doc li { margin: 6px 0; }
+.doc code { font-family: var(--mono); font-size: 0.88em; color: var(--ink); overflow-wrap: anywhere; }
+.doc .hud { margin-bottom: 18px; }
+.doc .back { display: inline-block; margin-top: 44px; }
+@media (max-width: 980px) {
+  .product-grid { grid-template-columns: 1fr; gap: 32px; }
+  .product-shot { width: 100%; max-width: 700px; justify-self: center; }
+  .panel-shot { max-width: 460px; }
+}
+@media (max-width: 560px) {
+  .product-section { padding: 9vh 18px; }
+  .quotabar-site .doc { padding: 96px 18px 60px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
 }

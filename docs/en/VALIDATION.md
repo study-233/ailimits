@@ -102,3 +102,15 @@ Release preparation passed formatting, Clippy with warnings denied, all 136 auto
 
 
 Latest results: 136 automated tests passed (9 desktop/environment-dependent tests excluded from the default run); both hidden native checks above passed separately. Formatting, Clippy with warnings denied, diff whitespace checks and the release-min build passed. The original output was initially locked by the running old executable. After the user exited it and requested replacement, the offline release-min build from `target/acceptance` was copied to `target/release-min/ailimits.exe` and its SHA-256 verified against the build output. Delivered executable size: 3,840,000 bytes. The application was not automatically started; user acceptance remains pending.
+
+
+## Reliability and everyday-use optimizations (2026-09-19)
+
+- 148 automated tests passed; 9 desktop/export/environment checks remain excluded from the default run. Formatting, Clippy with warnings denied and the release-min build for both binaries passed using the MSVC toolchain with `--offline --locked`.
+- Account regression coverage verifies that authentication/network errors preserve same-account quota but never reuse a different or unknown Codex account. Startup now waits for an attempted account before using Codex disk cache.
+- Taskbar tests verify 120 unchanged checks skip rasterization/presentation, moves reuse the BGRA buffer, hidden/failed presentations retry, and size/theme/style/interaction/quota-state changes invalidate pixels. These are deterministic work-reduction checks, not a live CPU benchmark.
+- Persistence tests hold older writes in flight to verify serial ordering, snapshot coalescing, protected final writes, deletion ordering and account-history schema compatibility. Normal event-loop shutdown waits for final config, provider-cache and history saves with bounded waits; forced process termination is outside that guarantee.
+- Alert tests cover an independently exhausted weekly window, per-window cooldowns and thresholds, account changes, real reset cycles, and exclusion of cached/estimated/error samples. Config tests cover legacy inheritance, explicit overrides, malformed fields and clamping.
+- Diagnostic tests inject credential-bearing URLs, emails, paths and account labels into error data and verify none appear in copied reports. Menu wiring compiles; interactive notification delivery, diagnostic clipboard interaction and physical multi-monitor behavior were not exercised.
+- Local site validation passed HTML links/assets/anchors, JSON-LD and XML parsing, JavaScript syntax and fork-only installation links. Headless Edge at exact 1440×1000 and 390×844 viewports showed loaded images and no horizontal content overflow; desktop, mobile and install captures were inspected. Privacy also passed the mobile overflow check. Outputs are in `target/optimization-preview/`.
+- Built executable: `target/acceptance/release-min/ailimits.exe` (3,867,648 bytes). The existing installed process was neither replaced nor restarted. No website deployment or release publication was performed.

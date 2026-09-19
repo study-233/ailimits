@@ -146,22 +146,27 @@ pub async fn load() -> History {
     h.compact(Utc::now());
     h
 }
-/// One writer, newest snapshot wins; no disk access on the window thread.
-pub fn saver(runtime: &tokio::runtime::Runtime) -> tokio::sync::watch::Sender<Option<History>> {
-    let (tx, mut rx) = tokio::sync::watch::channel::<Option<History>>(None);
-    runtime.spawn(async move {
-        while rx.changed().await.is_ok() {
-            let h = rx.borrow_and_update().clone();
-            if let Some(h) = h {
-                if let Ok(bytes) = serde_json::to_vec(&h) {
-                    if let Err(e) = crate::config::storage::atomic_write(&path(), &bytes).await {
-                        tracing::warn!("history save: {e}");
-                    }
-                }
+/// One writer, newest snapshot wins; its owner flushes the final history on exit.
+pub fn saver(runtime: &tokio::runtime::Runtime) -> crate::config::storage::SnapshotSaver<History> {
+    saver_to(runtime.handle(), path())
+}
+
+/// Explicit destination keeps persistence tests isolated from the user's history.
+pub fn saver_to(
+    handle: &tokio::runtime::Handle,
+    path: std::path::PathBuf,
+) -> crate::config::storage::SnapshotSaver<History> {
+    crate::config::storage::spawn_snapshot_saver(handle, "history", move |history| {
+        let path = path.clone();
+        async move {
+            let bytes = serde_json::to_vec(&history)?;
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
             }
+            crate::config::storage::atomic_write(&path, &bytes).await?;
+            Ok(())
         }
-    });
-    tx
+    })
 }
 #[cfg(test)]
 mod tests {

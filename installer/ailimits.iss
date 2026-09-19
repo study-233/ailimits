@@ -4,7 +4,7 @@
 ; Binaries are taken from target\release-min (cargo build --profile release-min).
 
 #define AppName "QuotaBar"
-#define AppVersion "0.3.0"
+#define AppVersion "0.4.0"
 #define AppExe "ailimits.exe"
 
 [Setup]

@@ -49,6 +49,19 @@ impl CodexProvider {
         }
     }
 
+    fn scoped_data(
+        &self,
+        token: &str,
+        status: ProviderStatus,
+        metrics: Vec<Metric>,
+    ) -> ProviderData {
+        let mut data = self.data(status, metrics);
+        // Keep the attempted account even on failure, so another account's
+        // cached quota cannot masquerade as this request's last known data.
+        data.account_key = Some(crate::meter::identity::token_identity(token).key);
+        data
+    }
+
     /// ChatGPT subscription usage. The CLI token is read-only: Codex CLI
     /// refreshes it itself, the widget must never rotate it.
     async fn fetch_via_subscription(&self) -> Result<ProviderData> {
@@ -76,11 +89,14 @@ impl CodexProvider {
 
         match self.fetch_usage(&token).await {
             Ok(Some(data)) => Ok(data),
-            Ok(None) => Ok(self.data(
+            Ok(None) => Ok(self.scoped_data(
+                &token,
                 ProviderStatus::AuthError("token expired".to_string()),
                 vec![],
             )),
-            Err(e) => Ok(self.data(ProviderStatus::NetworkError(e.to_string()), vec![])),
+            Err(e) => {
+                Ok(self.scoped_data(&token, ProviderStatus::NetworkError(e.to_string()), vec![]))
+            }
         }
     }
 
@@ -100,21 +116,22 @@ impl CodexProvider {
                 if metrics.is_empty() {
                     // Undocumented endpoint: an unknown schema is an honest error,
                     // not invented numbers.
-                    return Ok(Some(self.data(
+                    return Ok(Some(self.scoped_data(
+                        token,
                         ProviderStatus::NetworkError("unrecognized wham/usage schema".to_string()),
                         vec![],
                     )));
                 }
-                let mut data = self.data(ProviderStatus::Ok, metrics);
+                let mut data = self.scoped_data(token, ProviderStatus::Ok, metrics);
                 data.plan_type = plan_type;
                 for m in &mut data.metrics {
                     m.observed_at = Some(data.updated_at);
                 }
-                data.account_key = Some(crate::meter::identity::token_identity(token).key);
                 Ok(Some(data))
             }
             401 | 403 => Ok(None),
-            other => Ok(Some(self.data(
+            other => Ok(Some(self.scoped_data(
+                token,
                 ProviderStatus::NetworkError(format!("HTTP {other}")),
                 vec![],
             ))),

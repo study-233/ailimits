@@ -114,30 +114,34 @@ pub async fn save_to(config: &Config, path: &Path) -> Result<()> {
 /// disk must delay exit, not prevent it.
 const SHUTDOWN_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// A message for the config writer task.
+/// A message for a snapshot writer. The default preserves the config API.
 #[derive(Clone)]
-pub enum SaveMsg {
-    /// Persist this config and keep running.
-    Write(Config),
-    /// Persist this config, then stop. Always the writer's last action.
-    Final(Config),
+pub enum SaveMsg<T = Config> {
+    /// Persist this snapshot and keep running.
+    Write(T),
+    /// Persist this snapshot, then stop. Always the writer's last action.
+    Final(T),
 }
 
-/// The single background config writer. Every write goes through one task, so
+/// A single background snapshot writer. Every write goes through one task, so
 /// two writes can never interleave or land out of order.
-pub struct ConfigSaver {
-    tx: std::sync::Arc<tokio::sync::watch::Sender<Option<SaveMsg>>>,
+pub struct SnapshotSaver<T> {
+    tx: std::sync::Arc<tokio::sync::watch::Sender<Option<SaveMsg<T>>>>,
     task: tokio::task::JoinHandle<()>,
+    name: &'static str,
 }
 
 /// A cheap clone of the writer's sending end, for the app's hot paths.
 #[derive(Clone)]
-pub struct ConfigSaverHandle {
-    tx: std::sync::Arc<tokio::sync::watch::Sender<Option<SaveMsg>>>,
+pub struct SnapshotSaverHandle<T> {
+    tx: std::sync::Arc<tokio::sync::watch::Sender<Option<SaveMsg<T>>>>,
 }
 
-impl ConfigSaverHandle {
-    /// Queue a config for persistence. Fire-and-forget: a burst coalesces to
+pub type ConfigSaver = SnapshotSaver<Config>;
+pub type ConfigSaverHandle = SnapshotSaverHandle<Config>;
+
+impl<T> SnapshotSaverHandle<T> {
+    /// Queue a snapshot for persistence. Fire-and-forget: a burst coalesces to
     /// the latest value on the one-slot channel.
     ///
     /// If a `Final` has already been queued (`shutdown` is under way), this
@@ -147,35 +151,35 @@ impl ConfigSaverHandle {
     /// that slipped into the slot after `Final` but before the writer task
     /// picked it up would make the task loop back for more instead of
     /// breaking, and the `JoinHandle` `shutdown` awaits would never resolve.
-    pub fn save(&self, config: Config) {
+    pub fn save(&self, snapshot: T) {
         self.tx.send_if_modified(|slot| match slot {
             Some(SaveMsg::Final(_)) => false,
             _ => {
-                *slot = Some(SaveMsg::Write(config));
+                *slot = Some(SaveMsg::Write(snapshot));
                 true
             }
         });
     }
 }
 
-impl ConfigSaver {
+impl<T> SnapshotSaver<T> {
     /// A sending handle for the app's save call sites.
-    pub fn handle(&self) -> ConfigSaverHandle {
-        ConfigSaverHandle {
+    pub fn handle(&self) -> SnapshotSaverHandle<T> {
+        SnapshotSaverHandle {
             tx: self.tx.clone(),
         }
     }
 
-    /// Persist `config` and BLOCK until the writer has finished and stopped.
+    /// Persist `snapshot` and BLOCK until the writer has finished and stopped.
     ///
     /// This is the shutdown path. It deliberately does not write the file
     /// itself: a direct write would be a second writer racing whatever the
     /// task already has in flight, and a slower in-flight write of an older
-    /// snapshot could rename over the newest config. Handing the task a
+    /// snapshot could rename over the newest data. Handing the task a
     /// `Final` message instead keeps a single writer, and awaiting the task
-    /// to completion proves the newest config reached disk before the
-    /// process exits. That guarantee holds only when the wait succeeds
-    /// within `SHUTDOWN_FLUSH_TIMEOUT`: on timeout the `JoinHandle` is
+    /// to completion ensures the final write was attempted before the
+    /// process exits. Write errors are logged. The wait is bounded by
+    /// `SHUTDOWN_FLUSH_TIMEOUT`: on timeout the `JoinHandle` is
     /// simply dropped rather than cancelled, so a wedged write can still
     /// land on disk after this function has already returned.
     ///
@@ -188,9 +192,9 @@ impl ConfigSaver {
     /// from within a runtime". A fresh thread never carries that context, so
     /// entering the runtime there is always sound; joining it back is a
     /// plain OS-level wait that works from either kind of caller.
-    pub fn shutdown(self, config: Config, rt: &tokio::runtime::Handle) {
-        let ConfigSaver { tx, task } = self;
-        let _ = tx.send(Some(SaveMsg::Final(config)));
+    pub fn shutdown(self, snapshot: T, rt: &tokio::runtime::Handle) {
+        let SnapshotSaver { tx, task, name } = self;
+        let _ = tx.send(Some(SaveMsg::Final(snapshot)));
         let rt = rt.clone();
         let waited = std::thread::spawn(move || {
             // `tokio::time::timeout` must be constructed AFTER the runtime is
@@ -202,44 +206,63 @@ impl ConfigSaver {
         .join();
         match waited {
             Ok(Ok(Ok(()))) => {}
-            Ok(Ok(Err(e))) => tracing::warn!("config writer task failed: {e}"),
-            Ok(Err(_)) => tracing::warn!("final config save timed out"),
+            Ok(Ok(Err(e))) => tracing::warn!("{name} writer task failed: {e}"),
+            Ok(Err(_)) => tracing::warn!("final {name} save timed out"),
             Err(_) => {
-                tracing::warn!("config writer thread panicked while waiting for the final save")
+                tracing::warn!("{name} writer thread panicked while waiting for the final save")
             }
         }
     }
 }
 
-/// Spawn the single background config-saver task. Sending a config overwrites a
-/// one-slot `watch` channel, so a burst of changes coalesces to the LATEST (the
-/// newest setting always wins) AND the queue is bounded to one entry — a
+/// Spawn one background writer for config, provider cache, or history. Sending
+/// a snapshot overwrites a one-slot `watch` channel, so a burst of changes
+/// coalesces to the latest snapshot and the queue is bounded to one entry — a
 /// slow/stalled disk cannot grow it. This also serialises writes, closing the
 /// race where two independently-spawned saves could atomic-rename out of order
-/// and drop the newest config.
-pub fn spawn_saver(handle: &tokio::runtime::Handle, path: PathBuf) -> ConfigSaver {
-    let (tx, mut rx) = tokio::sync::watch::channel::<Option<SaveMsg>>(None);
+/// and drop the newest snapshot. All operations, including deleting an empty
+/// cache, must run through this writer.
+pub fn spawn_snapshot_saver<T, W, F>(
+    handle: &tokio::runtime::Handle,
+    name: &'static str,
+    mut write: W,
+) -> SnapshotSaver<T>
+where
+    T: Clone + Send + Sync + 'static,
+    W: FnMut(T) -> F + Send + 'static,
+    F: std::future::Future<Output = Result<()>> + Send + 'static,
+{
+    let (tx, mut rx) = tokio::sync::watch::channel::<Option<SaveMsg<T>>>(None);
     let task = handle.spawn(async move {
         while rx.changed().await.is_ok() {
             let msg = rx.borrow_and_update().clone();
-            let (cfg, last) = match msg {
-                Some(SaveMsg::Write(cfg)) => (cfg, false),
-                Some(SaveMsg::Final(cfg)) => (cfg, true),
-                // The initial `None` seed carries no config.
+            let (snapshot, last) = match msg {
+                Some(SaveMsg::Write(snapshot)) => (snapshot, false),
+                Some(SaveMsg::Final(snapshot)) => (snapshot, true),
+                // The initial `None` seed carries no snapshot.
                 None => continue,
             };
-            if let Err(e) = save_to(&cfg, &path).await {
-                tracing::warn!("config save failed: {e}");
+            if let Err(e) = write(snapshot).await {
+                tracing::warn!("{name} save failed: {e}");
             }
             if last {
                 break;
             }
         }
     });
-    ConfigSaver {
+    SnapshotSaver {
         tx: std::sync::Arc::new(tx),
         task,
+        name,
     }
+}
+
+/// Keep the config's existing public API and TOML representation.
+pub fn spawn_saver(handle: &tokio::runtime::Handle, path: PathBuf) -> ConfigSaver {
+    spawn_snapshot_saver(handle, "config", move |config| {
+        let path = path.clone();
+        async move { save_to(&config, &path).await }
+    })
 }
 
 /// Write bytes to `path` atomically: write a uniquely-named sibling temp

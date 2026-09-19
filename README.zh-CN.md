@@ -17,6 +17,7 @@
 - **点击查看详情**：左键打开完整配额面板，默认显示 5 小时、每周、重置机会、额度历史和 Token 活动。面板模块独立于任务栏，可分别开关和排序。再次点击、点击外部或按 Esc 关闭，不再显示悬停提示。
 - **原生设置**：分为“任务栏外观”和“面板内容”。拖动手柄或使用上下按钮排列模块，实时预览，保存生效，取消回滚。隐藏模块保留位置，历史继续记录。
 - **保持轻量**：Rust + Win32 + CPU 矢量绘制，无 WebView、无字体下载、无持续动画；复用现有额度请求。
+- **独立提醒与诊断**：在“更多”中分别设置 5 小时／每周已用额度提醒阈值，查看失败原因并复制脱敏诊断报告。
 - **中英文界面**：跟随系统或手动切换；支持 Windows 静态系统代理和直连。
 
 ## 下载与安装
@@ -89,7 +90,7 @@ cargo +stable-x86_64-pc-windows-msvc build --locked --profile release-min --bins
 产物位于 `target/release-min/`。使用 Inno Setup 6 构建安装器：
 
 ```powershell
-./tools/package-release.ps1 -Version 0.3.0 -Iscc 'C:\路径\ISCC.exe'
+./tools/package-release.ps1 -Version 0.4.0 -Iscc 'C:\路径\ISCC.exe'
 ```
 
 网络测试只使用本地模拟服务，不依赖真实令牌。渲染预览与原生设置验证说明见[开发验证](docs/en/VALIDATION.md)。

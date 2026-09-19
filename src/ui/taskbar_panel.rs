@@ -31,6 +31,65 @@ const INIT_H: u32 = 40;
 /// imperceptible over the taskbar.
 const HIT_ALPHA: u8 = 1;
 
+type PanelRect = (i32, i32, u32, u32);
+
+/// Pixel inputs deliberately exclude screen position: moving an unchanged
+/// panel only needs to present the existing bitmap at its new coordinates.
+#[derive(Clone, PartialEq)]
+struct FrameState {
+    quotas: Vec<WeeklyQuota>,
+    light: bool,
+    appearance: Appearance,
+    warning_remaining: f32,
+    size: (u32, u32),
+    hovered: bool,
+    pressed: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FrameUpdate {
+    Unchanged,
+    PresentCached,
+    Rendered,
+}
+
+#[derive(Default)]
+struct PanelFrame {
+    state: Option<FrameState>,
+    bgra: Vec<u8>,
+    /// Only successful presentation makes a placement reusable. Hiding or a
+    /// failed present must leave another presentation pending, even unchanged.
+    presented: Option<PanelRect>,
+}
+
+impl PanelFrame {
+    fn prepare(&mut self, state: FrameState, rect: PanelRect, force: bool) -> FrameUpdate {
+        if force || self.state.as_ref() != Some(&state) {
+            let pixmap = render_frame(&state);
+            self.bgra.resize(pixmap.data().len(), 0);
+            // Premultiplied RGBA -> BGRA for UpdateLayeredWindow.
+            for (src, dst) in pixmap
+                .data()
+                .chunks_exact(4)
+                .zip(self.bgra.chunks_exact_mut(4))
+            {
+                dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+            }
+            self.state = Some(state);
+            self.presented = None;
+            FrameUpdate::Rendered
+        } else if self.presented != Some(rect) {
+            FrameUpdate::PresentCached
+        } else {
+            FrameUpdate::Unchanged
+        }
+    }
+
+    fn hide(&mut self) {
+        self.presented = None;
+    }
+}
+
 /// Ink + track colors for the current system theme. Near-black on a light
 /// taskbar, near-white on a dark one; the track is the ink at a low alpha so
 /// it reads as a faint groove rather than a filled box.
@@ -66,13 +125,11 @@ pub struct TaskbarPanel {
     last_position_x: Option<i32>,
     drag: Option<PanelDrag>,
     window: Rc<Window>,
-    pixmap: Pixmap,
+    frame: PanelFrame,
     mode: IndicatorKind,
-    /// Include validity and staleness so unchanged percentages cannot mask errors.
-    last: Option<(Vec<WeeklyQuota>, bool)>,
     size: (u32, u32),
     /// Current screen placement, or None while hidden (taskbar slid away).
-    rect: Option<(i32, i32, u32, u32)>,
+    rect: Option<PanelRect>,
     /// True while a fullscreen app owns the screen: EVERY presentation path
     /// (update ticks, taskbar moves, raises) is gated on this, so nothing can
     /// resurrect the overlay over a game between fallback evaluations.
@@ -122,7 +179,6 @@ impl TaskbarPanel {
                 .build(event_loop)
                 .context("panel window creation failed")?,
         );
-        let pixmap = Pixmap::new(INIT_W, INIT_H).context("panel pixmap")?;
         Ok(Self {
             warning_remaining: 20.0,
             hovered: false,
@@ -135,9 +191,8 @@ impl TaskbarPanel {
             last_position_x: None,
             drag: None,
             window,
-            pixmap,
+            frame: PanelFrame::default(),
             mode: IndicatorKind::Off,
-            last: None,
             size: (INIT_W, INIT_H),
             rect: None,
             suppressed: false,
@@ -166,7 +221,6 @@ impl TaskbarPanel {
         self.cancel_drag();
         self.position_x = x;
         self.last_position_x = None;
-        self.last = None;
     }
 
     pub fn is_dragging(&self) -> bool {
@@ -175,14 +229,12 @@ impl TaskbarPanel {
 
     pub fn set_warning_threshold(&mut self, used: u8) {
         self.warning_remaining = 100.0 - used.min(100) as f32;
-        self.last = None;
     }
 
     pub fn set_appearance(&mut self, mut appearance: Appearance) {
         appearance.normalize();
         self.content_width = appearance_width(&appearance);
         self.appearance = appearance;
-        self.last = None;
     }
 
     pub fn set_locked(&mut self, locked: bool) {
@@ -260,7 +312,7 @@ impl TaskbarPanel {
             let x =
                 (drag.left + dx).clamp(slot.left, (slot.right - self.size.0 as i32).max(slot.left));
             self.position_x = Some(((x - slot.left) as f32 / scale).round() as i32);
-            self.update(providers, true);
+            self.update(providers, false);
         }
         #[cfg(not(windows))]
         let _ = providers;
@@ -300,7 +352,6 @@ impl TaskbarPanel {
         if let Some(drag) = self.drag.take() {
             self.position_x = drag.original;
             self.last_position_x = drag.last_original;
-            self.last = None;
             self.release_capture();
         }
     }
@@ -351,8 +402,6 @@ impl TaskbarPanel {
         self.suppressed = false;
         self.unavailable = false;
         if Self::is_panel_mode(mode) {
-            self.last = None;
-            self.reposition();
             self.update(providers, true);
         } else {
             #[cfg(target_os = "windows")]
@@ -367,14 +416,7 @@ impl TaskbarPanel {
             return;
         }
         self.reposition();
-        let state = (
-            super::quota_view::selected(providers, &self.appearance),
-            crate::platform::system_uses_light_theme(),
-        );
-        if force || self.last.as_ref() != Some(&state) {
-            self.last = Some(state);
-            self.redraw(providers);
-        }
+        self.present(providers, force);
     }
 
     /// Re-assert the overlay's topmost z-order after another window covered it
@@ -423,13 +465,11 @@ impl TaskbarPanel {
     /// revived by moving it, toggling it, or anything else short of restarting
     /// the whole application. That is what the user hit.
     ///
-    /// Clearing `last` matters too: it is the "what did I draw" cache, and a
-    /// stale entry means the redraw is skipped as a no-op precisely when the
-    /// panel needs re-presenting.
+    /// Force fresh pixels and presentation even when the cached inputs and
+    /// placement match: this is also the explicit recovery action.
     pub fn restart(&mut self, providers: &[ProviderData]) {
         self.suppressed = false;
         self.unavailable = false;
-        self.last = None;
         if !Self::is_panel_mode(self.mode) {
             self.hide();
             return;
@@ -441,11 +481,7 @@ impl TaskbarPanel {
     /// The taskbar moved (auto-hide slide / resolution change) or the tray
     /// area changed width (icon pinned/unpinned) — follow it.
     pub fn on_taskbar_moved(&mut self, providers: &[ProviderData]) {
-        if !Self::is_panel_mode(self.mode) || self.suppressed {
-            return;
-        }
-        self.reposition();
-        self.redraw(providers);
+        self.update(providers, false);
     }
 
     /// A fullscreen app took the screen: hide with the taskbar (which sits
@@ -468,8 +504,7 @@ impl TaskbarPanel {
         if !Self::is_panel_mode(self.mode) {
             return;
         }
-        self.reposition();
-        self.redraw(providers);
+        self.update(providers, false);
     }
 
     /// Ring and number width, scaled with the taskbar height.
@@ -486,13 +521,7 @@ impl TaskbarPanel {
         #[cfg(target_os = "windows")]
         crate::platform::hide_window(self.hwnd());
         self.rect = None;
-    }
-
-    fn resize_pixmap(&mut self, w: u32, h: u32) {
-        self.size = (w, h);
-        if let Some(pm) = Pixmap::new(w, h) {
-            self.pixmap = pm;
-        }
+        self.frame.hide();
     }
 
     /// Track the taskbar: hide with it (auto-hide), or float just left of the
@@ -590,14 +619,7 @@ impl TaskbarPanel {
             }
             self.unavailable = false;
             let y = slot.top + (slot.height - h as i32) / 2;
-            if self.size != (w, h) {
-                self.resize_pixmap(w, h);
-                self.last = None;
-            }
-            // Re-presenting is needed when reappearing after a hide.
-            if self.rect.is_none() {
-                self.last = None;
-            }
+            self.size = (w, h);
             let y = (y + self.offset.1).clamp(slot.top, slot.top + slot.height - h as i32);
             if before.map(|(bx, _, _, _)| bx) != Some(x) {
                 tracing::debug!(
@@ -615,69 +637,46 @@ impl TaskbarPanel {
     /// Paint (near-transparent background) and present via UpdateLayeredWindow:
     /// theme-aware activity ring and adjacent remaining percentage.
     pub fn redraw(&mut self, providers: &[ProviderData]) {
-        if !Self::is_panel_mode(self.mode) {
+        self.present(providers, true);
+    }
+
+    fn present(&mut self, providers: &[ProviderData], force: bool) {
+        if !Self::is_panel_mode(self.mode) || self.suppressed {
             return;
         }
-        let Some((x, y, w, h)) = self.rect else {
+        let Some(rect @ (x, y, w, h)) = self.rect else {
             return;
         };
-        self.pixmap = super::quota_view::render_with_threshold(
-            w,
-            h,
-            &super::quota_view::selected(providers, &self.appearance),
-            crate::platform::system_uses_light_theme(),
-            &self.appearance,
-            self.warning_remaining,
-        );
-
-        if self.hovered || self.pressed {
-            let mut surface = Pixmap::new(w, h).expect("panel hover");
-            surface.fill(color(0, 0, 0, HIT_ALPHA));
-            let light = crate::platform::system_uses_light_theme();
-            let alpha = if self.pressed { 20 } else { 12 };
-            let ink = if light {
-                color(0, 0, 0, alpha)
-            } else {
-                color(255, 255, 255, alpha)
-            };
-            let scale = h as f32 / 48.;
-            super::tray::fill_round_rect(
-                &mut surface,
-                0.,
-                2. * scale,
-                w as f32,
-                h as f32 - 4. * scale,
-                super::theme::UiMetrics::CONTROL_RADIUS * scale,
-                ink,
-            );
-            surface.draw_pixmap(
-                0,
-                0,
-                self.pixmap.as_ref(),
-                &tiny_skia::PixmapPaint::default(),
-                tiny_skia::Transform::identity(),
-                None,
-            );
-            self.pixmap = surface;
-        }
-        // Premultiplied RGBA → BGRA for UpdateLayeredWindow.
-        let data = self.pixmap.data();
-        let mut bgra = vec![0u8; data.len()];
-        for (s, d) in data.chunks_exact(4).zip(bgra.chunks_exact_mut(4)) {
-            d[0] = s[2];
-            d[1] = s[1];
-            d[2] = s[0];
-            d[3] = s[3];
+        let state = FrameState {
+            quotas: super::quota_view::selected(providers, &self.appearance),
+            light: crate::platform::system_uses_light_theme(),
+            appearance: self.appearance.clone(),
+            warning_remaining: self.warning_remaining,
+            size: (w, h),
+            hovered: self.hovered,
+            pressed: self.pressed,
+        };
+        if self.frame.prepare(state, rect, force) == FrameUpdate::Unchanged {
+            return;
         }
         #[cfg(target_os = "windows")]
-        match crate::platform::present_layered(self.hwnd(), &bgra, x, y, w as i32, h as i32) {
+        match crate::platform::present_layered(
+            self.hwnd(),
+            &self.frame.bgra,
+            x,
+            y,
+            w as i32,
+            h as i32,
+        ) {
             Ok(()) => {
+                self.frame.presented = Some(rect);
                 if self.last_present_error.is_some() {
                     tracing::info!("taskbar panel present recovered");
                     self.last_present_error = None;
                 }
             }
             Err(code) => {
+                self.frame.presented = None;
                 if self.last_present_error != Some(code) {
                     tracing::warn!("taskbar panel present failed, error {code}");
                     self.last_present_error = Some(code);
@@ -686,9 +685,52 @@ impl TaskbarPanel {
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = (&bgra, x, y);
+            let _ = (x, y);
+            self.frame.presented = Some(rect);
         }
     }
+}
+
+fn render_frame(state: &FrameState) -> Pixmap {
+    let (w, h) = state.size;
+    let pixmap = super::quota_view::render_with_threshold(
+        w,
+        h,
+        &state.quotas,
+        state.light,
+        &state.appearance,
+        state.warning_remaining,
+    );
+    if !state.hovered && !state.pressed {
+        return pixmap;
+    }
+    let mut surface = Pixmap::new(w, h).expect("panel hover");
+    surface.fill(color(0, 0, 0, HIT_ALPHA));
+    let alpha = if state.pressed { 20 } else { 12 };
+    let ink = if state.light {
+        color(0, 0, 0, alpha)
+    } else {
+        color(255, 255, 255, alpha)
+    };
+    let scale = h as f32 / 48.;
+    super::tray::fill_round_rect(
+        &mut surface,
+        0.,
+        2. * scale,
+        w as f32,
+        h as f32 - 4. * scale,
+        super::theme::UiMetrics::CONTROL_RADIUS * scale,
+        ink,
+    );
+    surface.draw_pixmap(
+        0,
+        0,
+        pixmap.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    surface
 }
 
 /// Shared by the live panel and render verification; no window is needed.
@@ -748,6 +790,129 @@ pub(crate) fn render_styled_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frame_state() -> FrameState {
+        let appearance = Appearance::default();
+        FrameState {
+            quotas: vec![WeeklyQuota::from_providers(&[
+                crate::ui::weekly::tests::data(32),
+            ])],
+            light: false,
+            size: (appearance_width(&appearance).ceil() as u32, 48),
+            appearance,
+            warning_remaining: 20.,
+            hovered: false,
+            pressed: false,
+        }
+    }
+
+    #[test]
+    fn stationary_checks_skip_work_and_moves_reuse_pixels() {
+        let state = frame_state();
+        let rect = (100, 900, state.size.0, state.size.1);
+        let mut frame = PanelFrame::default();
+        assert_eq!(
+            frame.prepare(state.clone(), rect, false),
+            FrameUpdate::Rendered
+        );
+        frame.presented = Some(rect);
+        let pixels = frame.bgra.clone();
+        let buffer = frame.bgra.as_ptr();
+        for _ in 0..120 {
+            assert_eq!(
+                frame.prepare(state.clone(), rect, false),
+                FrameUpdate::Unchanged
+            );
+        }
+        // Both horizontal placement changes and the shell's vertical slide
+        // still need presenting, but neither changes the bitmap.
+        for moved in [(120, 900, rect.2, rect.3), (120, 905, rect.2, rect.3)] {
+            assert_eq!(
+                frame.prepare(state.clone(), moved, false),
+                FrameUpdate::PresentCached
+            );
+            assert_eq!(frame.bgra, pixels);
+            assert_eq!(frame.bgra.as_ptr(), buffer);
+            frame.presented = Some(moved);
+            assert_eq!(
+                frame.prepare(state.clone(), moved, false),
+                FrameUpdate::Unchanged
+            );
+        }
+    }
+
+    #[test]
+    fn hidden_or_failed_present_is_retried_without_rasterizing() {
+        let state = frame_state();
+        let rect = (100, 900, state.size.0, state.size.1);
+        let mut frame = PanelFrame::default();
+        assert_eq!(
+            frame.prepare(state.clone(), rect, false),
+            FrameUpdate::Rendered
+        );
+        // A failed first present must never make a subsequent check a no-op.
+        assert_eq!(
+            frame.prepare(state.clone(), rect, false),
+            FrameUpdate::PresentCached
+        );
+        frame.presented = Some(rect);
+        let pixels = frame.bgra.clone();
+        frame.hide();
+        assert_eq!(
+            frame.prepare(state.clone(), rect, false),
+            FrameUpdate::PresentCached
+        );
+        assert_eq!(frame.bgra, pixels);
+        frame.presented = Some(rect);
+        frame.hide();
+        // Quota changes while hidden must be drawn before the panel returns.
+        let mut changed = state;
+        changed.quotas[0].remaining = Some(12.);
+        assert_eq!(frame.prepare(changed, rect, false), FrameUpdate::Rendered);
+        assert_ne!(frame.bgra, pixels);
+    }
+
+    #[test]
+    fn visible_inputs_and_forced_refresh_invalidate_pixels() {
+        let baseline = frame_state();
+        let rect = (100, 900, baseline.size.0, baseline.size.1);
+        let mut variants = Vec::new();
+        let mut add = |change: fn(&mut FrameState)| {
+            let mut state = baseline.clone();
+            change(&mut state);
+            variants.push(state);
+        };
+        add(|s| s.light = true);
+        add(|s| s.hovered = true);
+        add(|s| {
+            s.hovered = true;
+            s.pressed = true;
+        });
+        add(|s| s.warning_remaining = 75.);
+        add(|s| s.appearance.ring_color = "#00FF00".into());
+        add(|s| s.size = (s.size.0 * 2, s.size.1 * 2));
+        add(|s| s.quotas[0].remaining = Some(12.));
+        add(|s| s.quotas[0].stale = true);
+        add(|s| s.quotas[0].estimated = true);
+        add(|s| s.quotas[0].remaining = None);
+        for state in variants {
+            let mut frame = PanelFrame::default();
+            frame.prepare(baseline.clone(), rect, false);
+            frame.presented = Some(rect);
+            let next = (rect.0, rect.1, state.size.0, state.size.1);
+            assert_eq!(
+                frame.prepare(state.clone(), next, false),
+                FrameUpdate::Rendered
+            );
+            assert_eq!(frame.bgra.len(), (state.size.0 * state.size.1 * 4) as usize);
+            frame.presented = Some(next);
+            assert_eq!(
+                frame.prepare(state.clone(), next, false),
+                FrameUpdate::Unchanged
+            );
+            assert_eq!(frame.prepare(state, next, true), FrameUpdate::Rendered);
+        }
+    }
 
     #[test]
     fn customized_numbers_fit_all_readings_weights_and_scales() {

@@ -83,6 +83,15 @@ macro_rules! tr {
 }
 
 pub const MESSAGES: &[(&str, &str)] = &[
+    ("Limit", "额度"),
+    ("Quota alerts", "额度提醒"),
+    ("Enable notifications", "启用通知"),
+    ("Use provider threshold", "使用服务商默认阈值"),
+    ("Diagnostics…", "诊断信息…"),
+    ("Diagnostics", "诊断信息"),
+    ("Choose OK to copy this report.", "点击“确定”复制此报告，或点击“取消”关闭。"),
+    ("Diagnostic report copied", "诊断报告已复制"),
+    ("Could not copy diagnostic report", "无法复制诊断报告，请稍后重试"),
     ("Settings", "设置"),
     ("Last updated", "更新于"),
     ("5-hour quota", "5 小时额度"),

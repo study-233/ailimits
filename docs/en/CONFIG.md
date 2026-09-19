@@ -211,7 +211,7 @@ alert_threshold = 80
 
 [notifications]
 enabled = true
-# Per-provider toast cooldown, minutes.
+# Cooldown per provider and quota window, minutes.
 cooldown_minutes = 15
 
 [hooks]
@@ -270,3 +270,22 @@ A hidden, suspended helper is attached to a Windows job before it can spawn desc
 `%APPDATA%/AiLimits/quota-history.json` retains 30 days, partitioned by opaque SHA-256 account keys without tokens or email addresses. Quota observations append on changes and at 15-minute anchors, including while hidden; daily compaction removes old data. Token buckets replace their date rather than increment it. Gaps over `max(2 × refresh interval, 30 minutes)` and reset boundaries break quota lines. No pre-installation quota history is fabricated. Missing Token days differ from genuine zero; totals include only known dates.
 
 Click either chart to open a native detail window (quota: current cycle/7/30 days; Tokens: 7/30 days). Hovering samples displays dates and values in the window footer. Graph bitmaps are cached until data, size, theme, language or date changes. Closing the popup stops its UI timer.
+
+
+## Independent quota alerts and diagnostics
+
+Use **More → Quota alerts** to enable notifications and select separate Codex 5-hour and weekly thresholds. Thresholds are **used percentages**. “Use provider threshold” inherits the Codex provider's `alert_threshold`. These notification overrides do not change taskbar warning colors.
+
+```toml
+[notifications]
+enabled = true
+cooldown_minutes = 15
+codex_session_threshold = 90
+codex_weekly_threshold = 80
+```
+
+Omit either threshold to inherit the provider default. Cooldowns are independent per window and reset on an account change. Only live successful observations trigger alerts; cached, estimated and missing readings do not. Threshold/reset hooks identify Codex windows through `AILIMITS_WINDOW=5h` or `7d`; other providers and startup hooks leave it unset.
+
+**More → Diagnostics…** shows configured proxy mode, polling interval, latest provider results and extension status with recovery guidance. Choose OK to copy the report. It excludes tokens, emails, account identifiers, proxy addresses, local paths and raw error text. Diagnostics preserve the latest failure even when the quota UI retains a previous successful reading.
+
+Configuration, provider cache and history use serial background writers with coalesced snapshots and bounded final saves on normal event-loop exit. Startup waits for the attempted Codex account before exposing a disk snapshot; fallback after an error requires a matching known account.

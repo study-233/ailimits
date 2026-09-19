@@ -158,3 +158,151 @@ fn save_cannot_overwrite_a_final_already_queued() {
         );
     });
 }
+
+#[test]
+fn snapshot_saver_coalesces_updates_and_waits_for_the_final_write() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "ailimits-snapshot-order-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let destination = path.clone();
+    let saver = storage::spawn_snapshot_saver(rt.handle(), "test snapshot", move |value: u64| {
+        let destination = destination.clone();
+        let started_tx = started_tx.clone();
+        async move {
+            // Keep each write in flight until the test releases it. This
+            // exposes overlapping writes without relying on timer sleeps.
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            started_tx.send((value, release_tx)).unwrap();
+            release_rx.await.unwrap();
+            storage::atomic_write(&destination, &serde_json::to_vec(&value)?).await?;
+            Ok(())
+        }
+    });
+    let handle = saver.handle();
+    let receive = || {
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+    };
+
+    handle.save(1);
+    let (first, release_first) = receive();
+    assert_eq!(first, 1);
+    for value in 2..=100 {
+        handle.save(value);
+    }
+    assert!(started_rx.try_recv().is_err(), "writes must be serial");
+    release_first.send(()).unwrap();
+    let (latest, release_latest) = receive();
+    assert_eq!(latest, 100, "pending snapshots should coalesce");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "1");
+
+    let runtime_handle = rt.handle().clone();
+    let shutdown = std::thread::spawn(move || saver.shutdown(999, &runtime_handle));
+    release_latest.send(()).unwrap();
+    let (final_value, release_final) = receive();
+    assert_eq!(final_value, 999);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "100");
+    assert!(
+        !shutdown.is_finished(),
+        "shutdown must await its final write"
+    );
+    handle.save(2); // A stale producer cannot replace Final, even during its write.
+    release_final.send(()).unwrap();
+    shutdown.join().unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "999");
+    assert!(matches!(
+        started_rx.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Disconnected)
+    ));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn final_empty_snapshot_deletes_after_an_older_write() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "ailimits-snapshot-delete-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let mut release = Some(release_rx);
+    let destination = path.clone();
+    let saver =
+        storage::spawn_snapshot_saver(rt.handle(), "test cache", move |snapshot: Option<u64>| {
+            let destination = destination.clone();
+            let started_tx = started_tx.clone();
+            let release = release.take();
+            async move {
+                if let Some(release) = release {
+                    started_tx.send(()).unwrap();
+                    release.await.unwrap();
+                }
+                if let Some(value) = snapshot {
+                    storage::atomic_write(&destination, &serde_json::to_vec(&value)?).await?;
+                } else {
+                    tokio::fs::remove_file(&destination).await?;
+                }
+                Ok(())
+            }
+        });
+    let handle = saver.handle();
+    handle.save(Some(1));
+    started_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let runtime_handle = rt.handle().clone();
+    let shutdown = std::thread::spawn(move || saver.shutdown(None, &runtime_handle));
+    release_tx.send(()).unwrap();
+    shutdown.join().unwrap();
+    assert!(
+        !path.exists(),
+        "an old write must not resurrect an empty cache"
+    );
+}
+
+#[test]
+fn history_shutdown_persists_the_final_accounts_without_changing_the_schema() {
+    use ailimits::meter::history::{self, AccountHistory, History};
+    use std::collections::BTreeMap;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "ailimits-history-final-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let saver = history::saver_to(rt.handle(), path.clone());
+    let handle = saver.handle();
+    handle.save(History::default());
+
+    let today = chrono::Utc::now().date_naive();
+    let mut final_history = History::default();
+    final_history.accounts.insert(
+        "first-account".into(),
+        AccountHistory {
+            quota: vec![],
+            tokens: BTreeMap::from([(today, 123)]),
+        },
+    );
+    final_history.accounts.insert(
+        "second-account".into(),
+        AccountHistory {
+            quota: vec![],
+            tokens: BTreeMap::from([(today, 456)]),
+        },
+    );
+    saver.shutdown(final_history.clone(), rt.handle());
+    let saved: History = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved.accounts, final_history.accounts);
+    handle.save(History::default());
+    let after: History = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after.accounts, final_history.accounts);
+    std::fs::remove_file(path).unwrap();
+}

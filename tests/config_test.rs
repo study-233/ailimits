@@ -23,6 +23,52 @@ fn empty_toml_parses_to_defaults() {
 }
 
 #[test]
+fn quota_alert_thresholds_migrate_and_preserve_independent_values() {
+    use ailimits::providers::MetricWindow;
+    let old: Config =
+        toml::from_str("[notifications]\nenabled = false\ncooldown_minutes = 20").unwrap();
+    assert_eq!(
+        old.notifications.codex_threshold(MetricWindow::Session, 85),
+        85
+    );
+    assert_eq!(
+        old.notifications.codex_threshold(MetricWindow::Long, 85),
+        85
+    );
+    let config: Config = toml::from_str(
+        "[notifications]\ncodex_session_threshold = 90\ncodex_weekly_threshold = 70",
+    )
+    .unwrap();
+    let roundtrip: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+        roundtrip
+            .notifications
+            .codex_threshold(MetricWindow::Session, 80),
+        90
+    );
+    assert_eq!(
+        roundtrip
+            .notifications
+            .codex_threshold(MetricWindow::Long, 80),
+        70
+    );
+    let malformed: Config = toml::from_str("[notifications]\nenabled = false\ncodex_session_threshold = 'bad'\ncodex_weekly_threshold = 200").unwrap();
+    assert!(!malformed.notifications.enabled);
+    assert_eq!(
+        malformed
+            .notifications
+            .codex_threshold(MetricWindow::Session, 80),
+        80
+    );
+    assert_eq!(
+        malformed
+            .notifications
+            .codex_threshold(MetricWindow::Long, 80),
+        100
+    );
+}
+
+#[test]
 fn manual_taskbar_position_roundtrips_and_old_configs_stay_automatic() {
     let old: Config = toml::from_str("[general]\nindicator = \"panel_rows\"").unwrap();
     assert_eq!(old.general.panel_position_x, None);

@@ -57,6 +57,19 @@ pub fn run(
     percent: Option<f32>,
     reset_at: Option<DateTime<Utc>>,
 ) {
+    run_for_window(runtime, command, event, provider, percent, reset_at, None);
+}
+
+/// Window-specific alerts also identify their quota period to opt-in hooks.
+pub fn run_for_window(
+    runtime: &tokio::runtime::Runtime,
+    command: &str,
+    event: HookEvent,
+    provider: ProviderId,
+    percent: Option<f32>,
+    reset_at: Option<DateTime<Utc>>,
+    window: Option<&'static str>,
+) {
     let command = command.trim().to_string();
     if command.is_empty() {
         return;
@@ -73,6 +86,11 @@ pub fn run(
         cmd.args(["/C", &command]);
         cmd.env("AILIMITS_EVENT", event_name);
         cmd.env("AILIMITS_PROVIDER", provider_name);
+        if let Some(window) = window {
+            cmd.env("AILIMITS_WINDOW", window);
+        } else {
+            cmd.env_remove("AILIMITS_WINDOW");
+        }
         if let Some(p) = percent {
             cmd.env("AILIMITS_PERCENT", p);
         }

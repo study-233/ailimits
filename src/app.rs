@@ -203,6 +203,37 @@ fn merge_cached_metrics(mut data: ProviderData, cached: Option<&ProviderData>) -
     data
 }
 
+fn same_cache_account(incoming: &ProviderData, cached: &ProviderData) -> bool {
+    incoming.id == cached.id
+        && (incoming.id != ProviderId::Codex
+            || (incoming.account_key.is_some() && incoming.account_key == cached.account_key))
+}
+
+/// Preserve real readings on a transient error only for the attempted account.
+fn provider_display_data(
+    incoming: ProviderData,
+    current: Option<&ProviderData>,
+    cached: Option<&ProviderData>,
+) -> ProviderData {
+    if matches!(incoming.status, ProviderStatus::Ok) {
+        return merge_cached_metrics(incoming, cached);
+    }
+    if matches!(
+        incoming.status,
+        ProviderStatus::NetworkError(_) | ProviderStatus::AuthError(_)
+    ) {
+        let usable = |data: &&ProviderData| {
+            same_cache_account(&incoming, data)
+                && matches!(data.status, ProviderStatus::Ok)
+                && !data.metrics.is_empty()
+        };
+        if let Some(previous) = current.filter(usable).or_else(|| cached.filter(usable)) {
+            return merge_cached_metrics(previous.clone(), cached);
+        }
+    }
+    incoming
+}
+
 fn prune_provider_cache_map(cache: &mut HashMap<ProviderId, ProviderData>) -> bool {
     let before: HashMap<ProviderId, usize> = cache
         .iter()
@@ -353,6 +384,48 @@ fn feedback(title: &str, body: &str) {
     }
 }
 
+fn show_diagnostics(report: String) {
+    #[cfg(windows)]
+    let copy = unsafe {
+        use windows::{
+            core::PCWSTR,
+            Win32::{
+                Foundation::HWND,
+                UI::WindowsAndMessaging::{MessageBoxW, IDOK, MB_ICONINFORMATION, MB_OKCANCEL},
+            },
+        };
+        let text: Vec<u16> = format!(
+            "{}\n\n{}",
+            report,
+            crate::i18n::t("Choose OK to copy this report.")
+        )
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+        let title: Vec<u16> = format!("QuotaBar · {}", crate::i18n::t("Diagnostics"))
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        MessageBoxW(
+            HWND::default(),
+            PCWSTR(text.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_OKCANCEL | MB_ICONINFORMATION,
+        ) == IDOK
+    };
+    #[cfg(not(windows))]
+    let copy = true;
+    if copy {
+        match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(report)) {
+            Ok(()) => feedback("QuotaBar", crate::i18n::t("Diagnostic report copied")),
+            Err(_) => feedback(
+                "QuotaBar",
+                crate::i18n::t("Could not copy diagnostic report"),
+            ),
+        }
+    }
+}
+
 /// Providers visible in the widget: enabled and connected. Disabled
 /// (enabled=false) and not-connected (NotConfigured) ones are not rendered.
 fn visible_data(config: &Config, display: &[ProviderData]) -> Vec<ProviderData> {
@@ -467,12 +540,19 @@ pub fn run() -> Result<()> {
         .iter()
         .map(|p| {
             let id = p.id();
+            // Wait for the attempted account before exposing a disk snapshot.
+            // A failed first request can still reuse a matching account below.
+            if id == ProviderId::Codex {
+                return loading_data(id);
+            }
             provider_cache
                 .get(&id)
                 .cloned()
                 .unwrap_or_else(|| loading_data(id))
         })
         .collect();
+    let mut latest_results: Vec<ProviderData> =
+        built.iter().map(|p| loading_data(p.id())).collect();
     let providers: SharedProviders = Arc::new(RwLock::new(built));
     if display.is_empty() {
         anyhow::bail!("no providers in config");
@@ -510,10 +590,7 @@ pub fn run() -> Result<()> {
     let _window = builder
         .build(&event_loop)
         .context("control window creation failed")?;
-    // Per-provider threshold-event cooldown (shared by toast and on_threshold).
-    let mut last_toast: HashMap<ProviderId, std::time::Instant> = HashMap::new();
-    // Previous primary % per provider, for reset-edge detection.
-    let mut last_pct: HashMap<ProviderId, f32> = HashMap::new();
+    let mut alert_tracker = crate::notifications::alerts::AlertTracker::default();
     // Whether the on_startup hook has fired (once after the first success).
     let mut startup_fired = false;
     // 9. The context menu: events → proxy.
@@ -586,7 +663,9 @@ pub fn run() -> Result<()> {
     #[cfg(windows)]
     let mut quota_popover = crate::ui::quota_popover::QuotaPopover::new(proxy.clone());
     let mut quota_history = runtime.block_on(crate::meter::history::load());
-    let history_saver = crate::meter::history::saver(&runtime);
+    let history_writer = crate::meter::history::saver(&runtime);
+    let history_saver = history_writer.handle();
+    let mut history_at_exit = Some(history_writer);
     let mut extensions = crate::meter::extras::Snapshot::default();
     let extras_gate = crate::meter::extras::Gate::default();
     let mut panel_draft = config.panel.clone();
@@ -598,14 +677,13 @@ pub fn run() -> Result<()> {
     #[cfg(target_os = "windows")]
     let mut recheck_at: Option<std::time::Instant> = Some(std::time::Instant::now());
     let rt_handle = runtime.handle().clone();
-    let cache_rt_handle = rt_handle.clone();
-    let save_cached_providers = move |cache: HashMap<ProviderId, ProviderData>| {
-        cache_rt_handle.spawn(async move {
-            if let Err(e) = save_provider_cache(cache).await {
-                warn!("provider cache save failed: {e}");
-            }
-        });
+    let cache_writer =
+        storage::spawn_snapshot_saver(&rt_handle, "provider cache", save_provider_cache);
+    let save_cached_providers = {
+        let handle = cache_writer.handle();
+        move |cache: HashMap<ProviderId, ProviderData>| handle.save(cache)
     };
+    let mut cache_at_exit = Some(cache_writer);
 
     // Save the config in the background through a single serialised writer
     // (storage::spawn_saver): a burst coalesces to the latest config on a
@@ -816,7 +894,7 @@ pub fn run() -> Result<()> {
                             (&key, &incoming.tokens)
                         {
                             if quota_history.update_tokens(key, days, Utc::now()) {
-                                let _ = history_saver.send(Some(quota_history.clone()));
+                                history_saver.save(quota_history.clone());
                             }
                         }
                         extensions.merge(incoming);
@@ -900,80 +978,70 @@ pub fn run() -> Result<()> {
                 }
                 UserEvent::Command(cmd) => match cmd {
                     AppCommand::UpdateProvider(data) => {
+                        if let Some(latest) = latest_results.iter_mut().find(|d| d.id == data.id) {
+                            *latest = data.clone();
+                        }
                         if quota_history.record(&data) | quota_history.compact(Utc::now()) {
-                            let _ = history_saver.send(Some(quota_history.clone()));
+                            history_saver.save(quota_history.clone());
                         }
                         if data.id == ProviderId::Codex {
                             meter_dirty = true;
                         }
 
-                        // Threshold crossing drives BOTH the toast and the
-                        // `on_threshold` hook, sharing one cooldown. The hook
-                        // fires even if toasts are disabled (it's its own opt-in).
-                        if let Some(pct) = data.primary_percentage() {
-                            let threshold = thresholds.get(&data.id).copied().unwrap_or(80) as f32;
-                            let cooldown = std::time::Duration::from_secs(
-                                config.notifications.cooldown_minutes.max(1) as u64 * 60,
-                            );
-                            let cooled = last_toast
-                                .get(&data.id)
-                                .is_none_or(|t| t.elapsed() >= cooldown);
-                            if pct >= threshold && cooled {
-                                last_toast.insert(data.id.clone(), std::time::Instant::now());
+                        for alert in alert_tracker.observe(
+                            &data,
+                            &config.notifications,
+                            thresholds.get(&data.id).copied().unwrap_or(80),
+                            std::time::Instant::now(),
+                        ) {
+                            if alert.threshold {
                                 if config.notifications.enabled {
-                                    let body = match data.headline_reset() {
-                                        Some(t) => {
-                                            let secs = t
-                                                .signed_duration_since(Utc::now())
-                                                .num_seconds()
-                                                .max(0);
-                                            crate::tr!(
-                                                "{percent}% used, resets in {duration}",
-                                                percent = pct.round() as u32,
-                                                duration = format_duration(secs)
+                                    let body = match alert.reset_at {
+                                        Some(reset) => crate::tr!(
+                                            "{percent}% used, resets in {duration}",
+                                            percent = alert.percent.round() as u32,
+                                            duration = format_duration(
+                                                reset
+                                                    .signed_duration_since(Utc::now())
+                                                    .num_seconds()
+                                                    .max(0)
                                             )
-                                        }
+                                        ),
                                         None => crate::tr!(
                                             "{percent}% used",
-                                            percent = pct.round() as u32
+                                            percent = alert.percent.round() as u32
                                         ),
                                     };
-                                    let title = crate::tr!(
-                                        "{provider} limit",
-                                        provider = data.id.display_name()
+                                    let title = format!(
+                                        "{} · {}",
+                                        data.id.display_name(),
+                                        crate::i18n::t(alert.scope.label())
                                     );
                                     if let Err(e) = ToastNotifier::show(&title, &body) {
                                         warn!("toast failed: {e}");
                                     }
                                 }
-                                hooks::run(
+                                hooks::run_for_window(
                                     &runtime,
                                     &config.hooks.on_threshold,
                                     hooks::HookEvent::Threshold,
                                     data.id.clone(),
-                                    Some(pct),
-                                    data.headline_reset(),
+                                    Some(alert.percent),
+                                    alert.reset_at,
+                                    alert.scope.window_id(),
                                 );
                             }
-
-                            // Reset edge: a provider that was near its limit
-                            // (>= threshold) dropping sharply means a window
-                            // rolled over. Self-debouncing: after firing, the
-                            // tracked % is low, so it won't refire until usage
-                            // climbs back above the threshold and drops again.
-                            if let Some(&prev) = last_pct.get(&data.id) {
-                                if prev >= threshold && pct + 30.0 < prev {
-                                    hooks::run(
-                                        &runtime,
-                                        &config.hooks.on_reset,
-                                        hooks::HookEvent::Reset,
-                                        data.id.clone(),
-                                        Some(pct),
-                                        data.headline_reset(),
-                                    );
-                                }
+                            if alert.reset {
+                                hooks::run_for_window(
+                                    &runtime,
+                                    &config.hooks.on_reset,
+                                    hooks::HookEvent::Reset,
+                                    data.id.clone(),
+                                    Some(alert.percent),
+                                    alert.reset_at,
+                                    alert.scope.window_id(),
+                                );
                             }
-                            last_pct.insert(data.id.clone(), pct);
                         }
 
                         // Startup edge: once, after the first successful fetch.
@@ -989,24 +1057,26 @@ pub fn run() -> Result<()> {
                             );
                         }
 
-                        // A transient error must NOT wipe the last real data —
-                        // it stays on screen; the renderer greys it out with
-                        // its age. Applies to every provider.
-                        let is_error = matches!(
-                            data.status,
-                            ProviderStatus::NetworkError(_) | ProviderStatus::AuthError(_)
-                        );
-                        if prune_provider_cache_map(&mut provider_cache) {
+                        // An account change invalidates fallback data on errors
+                        // as well as successful responses.
+                        let changed_account = data.id == ProviderId::Codex
+                            && provider_cache
+                                .get(&data.id)
+                                .is_some_and(|cached| !same_cache_account(&data, cached));
+                        if changed_account {
+                            provider_cache.remove(&data.id);
+                        }
+                        if prune_provider_cache_map(&mut provider_cache) | changed_account {
                             save_cached_providers(provider_cache.clone());
                         }
 
                         let is_success = matches!(data.status, ProviderStatus::Ok);
                         let cached_before_update = provider_cache.get(&data.id).cloned();
-                        let display_data = if is_success {
-                            merge_cached_metrics(data.clone(), cached_before_update.as_ref())
-                        } else {
-                            data.clone()
-                        };
+                        let display_data = provider_display_data(
+                            data.clone(),
+                            display.iter().find(|d| d.id == data.id),
+                            cached_before_update.as_ref(),
+                        );
                         if is_success {
                             provider_cache.remove(&data.id);
                         }
@@ -1016,28 +1086,7 @@ pub fn run() -> Result<()> {
                         if is_success {
                             save_cached_providers(provider_cache.clone());
                         }
-                        let had_real_data = display.iter().any(|d| {
-                            d.id == data.id
-                                && matches!(d.status, ProviderStatus::Ok)
-                                && !d.metrics.is_empty()
-                        }) || provider_cache.contains_key(&data.id);
-                        if is_error && had_real_data {
-                            if let Some(cached) = provider_cache.get(&data.id).cloned() {
-                                if let Some(slot) = display.iter_mut().find(|d| d.id == data.id) {
-                                    if !matches!(slot.status, ProviderStatus::Ok)
-                                        || slot.metrics.is_empty()
-                                    {
-                                        *slot = cached;
-                                    } else {
-                                        *slot = merge_cached_metrics(slot.clone(), Some(&cached));
-                                    }
-                                }
-                            }
-                            warn!(
-                                "provider {:?}: {:?} — keeping last data on screen",
-                                data.id, data.status
-                            );
-                        } else if let Some(slot) = display.iter_mut().find(|d| d.id == data.id) {
+                        if let Some(slot) = display.iter_mut().find(|d| d.id == data.id) {
                             *slot = display_data;
                         }
                         tray.update(&visible_data(&config, &display), &theme, false);
@@ -1392,6 +1441,30 @@ pub fn run() -> Result<()> {
                         menu.sync(&config);
                         save_config(config.clone());
                     }
+                    Some(MenuAction::ToggleNotifications) => {
+                        config.notifications.enabled = !config.notifications.enabled;
+                        menu.sync(&config);
+                        save_config(config.clone());
+                    }
+                    Some(MenuAction::SetQuotaAlertThreshold(window, threshold)) => {
+                        match window {
+                            MetricWindow::Session => {
+                                config.notifications.codex_session_threshold = threshold
+                            }
+                            MetricWindow::Long => {
+                                config.notifications.codex_weekly_threshold = threshold
+                            }
+                        }
+                        menu.sync(&config);
+                        save_config(config.clone());
+                    }
+                    Some(MenuAction::OpenDiagnostics) => {
+                        show_diagnostics(crate::diagnostics::report(
+                            &config,
+                            &latest_results,
+                            &extensions,
+                        ));
+                    }
                     Some(MenuAction::ToggleLock) => {
                         config.general.panel_locked = !config.general.panel_locked;
                         panel.set_locked(config.general.panel_locked);
@@ -1411,6 +1484,12 @@ pub fn run() -> Result<()> {
             // land after it. This one arm covers every exit path (window
             // close, tray Quit, menu Quit).
             Event::LoopDestroyed => {
+                if let Some(saver) = history_at_exit.take() {
+                    saver.shutdown(quota_history.clone(), &rt_handle);
+                }
+                if let Some(saver) = cache_at_exit.take() {
+                    saver.shutdown(provider_cache.clone(), &rt_handle);
+                }
                 if let Some(saver) = saver_at_exit.take() {
                     saver.shutdown(config.clone(), &rt_handle);
                 }
@@ -1515,6 +1594,32 @@ mod tests {
         );
         cached.account_key = None;
         assert_eq!(merge_cached_metrics(live, Some(&cached)).metrics.len(), 1);
+    }
+
+    #[test]
+    fn failed_account_switch_does_not_display_previous_accounts_quota() {
+        let mut previous = data(vec![pct("Weekly", 94, MetricWindow::Long)]);
+        previous.id = ProviderId::Codex;
+        previous.account_key = Some("account-a".into());
+        for status in [
+            ProviderStatus::NetworkError("offline".into()),
+            ProviderStatus::AuthError("expired".into()),
+        ] {
+            let mut failed = previous.clone();
+            failed.status = status;
+            failed.metrics.clear();
+            for account in [Some("account-b".into()), None] {
+                failed.account_key = account;
+                let shown = provider_display_data(failed.clone(), Some(&previous), Some(&previous));
+                assert!(shown.metrics.is_empty());
+                assert_eq!(shown.account_key, failed.account_key);
+                assert!(!matches!(shown.status, ProviderStatus::Ok));
+            }
+            failed.account_key = previous.account_key.clone();
+            let shown = provider_display_data(failed, Some(&previous), Some(&previous));
+            assert_eq!(shown.metrics[0].used, 94);
+            assert_eq!(shown.updated_at, previous.updated_at);
+        }
     }
 
     #[test]

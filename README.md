@@ -17,6 +17,7 @@
 - **Click for details.** The popup independently shows five modules: 5-hour quota, weekly quota, reset opportunities, quota history and Token activity. Select visibility and reorder modules in Settings. Click again, click outside or press Esc to close. No hover tooltips.
 - **Native preferences.** Separate Taskbar appearance and Panel content pages. Drag handles or use up/down buttons, preview, restore defaults, save or cancel. Hidden modules retain their positions.
 - **Lightweight architecture.** Rust, Win32 and CPU vector drawing. No WebView, bundled fonts or continuous animation. Both periods reuse existing quota requests.
+- **Independent alerts and diagnostics.** In More, set separate 5-hour/weekly used-quota thresholds, inspect failures and copy a report without credentials or account identifiers.
 - **English and Simplified Chinese**, with live Windows static-proxy support and a direct-connection option.
 
 ![Native quota details with demonstration data](docs/images/quota-popover-zh-dark.png)
@@ -87,7 +88,7 @@ cargo +stable-x86_64-pc-windows-msvc build --locked --profile release-min --bins
 Binaries are written to `target/release-min/`. Package them with Inno Setup 6:
 
 ```powershell
-./tools/package-release.ps1 -Version 0.3.0 -Iscc 'C:\path\to\ISCC.exe'
+./tools/package-release.ps1 -Version 0.4.0 -Iscc 'C:\path\to\ISCC.exe'
 ```
 
 Network tests use local mock servers, without real tokens. See [validation](docs/en/VALIDATION.md) for rendering and native preferences checks. Release automation creates a draft for review; it does not replace an already-published release.

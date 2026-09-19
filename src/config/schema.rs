@@ -290,9 +290,14 @@ pub struct ProviderConfig {
 pub struct NotificationConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Per-provider toast cooldown, minutes.
+    /// Cooldown per provider and quota window, minutes.
     #[serde(default = "default_cooldown")]
     pub cooldown_minutes: u32,
+    /// Used-percent thresholds. None inherits the Codex provider threshold.
+    #[serde(default, deserialize_with = "de_enum_or_default")]
+    pub codex_session_threshold: Option<u8>,
+    #[serde(default, deserialize_with = "de_enum_or_default")]
+    pub codex_weekly_threshold: Option<u8>,
 }
 
 impl Default for NotificationConfig {
@@ -300,7 +305,20 @@ impl Default for NotificationConfig {
         Self {
             enabled: true,
             cooldown_minutes: default_cooldown(),
+            codex_session_threshold: None,
+            codex_weekly_threshold: None,
         }
+    }
+}
+
+impl NotificationConfig {
+    pub fn codex_threshold(&self, window: crate::providers::MetricWindow, fallback: u8) -> u8 {
+        match window {
+            crate::providers::MetricWindow::Session => self.codex_session_threshold,
+            crate::providers::MetricWindow::Long => self.codex_weekly_threshold,
+        }
+        .unwrap_or(fallback)
+        .min(100)
     }
 }
 

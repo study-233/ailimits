@@ -25,6 +25,9 @@ pub enum MenuAction {
     SetIndicator(IndicatorKind),
     SetPanelDisplay(PanelDisplay),
     ToggleAutoUpdate,
+    ToggleNotifications,
+    SetQuotaAlertThreshold(crate::providers::MetricWindow, Option<u8>),
+    OpenDiagnostics,
     /// Update interval, seconds.
     SetUpdateInterval(u64),
     /// Enable/disable a provider.
@@ -79,6 +82,9 @@ pub struct ContextMenu {
     /// machine — see the "Only worth showing..." comment where it's built.
     display_items: Vec<(CheckMenuItem, PanelDisplay)>,
     auto_update_item: CheckMenuItem,
+    notifications_item: CheckMenuItem,
+    alert_items: Vec<(CheckMenuItem, crate::providers::MetricWindow, Option<u8>)>,
+    diagnostics_item: MenuItem,
     interval_items: Vec<(CheckMenuItem, u64)>,
     /// Per-provider enable toggles.
     provider_toggles: Vec<(CheckMenuItem, String)>,
@@ -277,6 +283,55 @@ impl ContextMenu {
 
         let quit_item = MenuItem::new(t("Quit"), true, None);
 
+        let notifications_menu = Submenu::new(t("Quota alerts"), true);
+        let notifications_item = CheckMenuItem::new(
+            t("Enable notifications"),
+            true,
+            config.notifications.enabled,
+            None,
+        );
+        notifications_menu.append(&notifications_item)?;
+        let mut alert_items = Vec::new();
+        for (label, window, configured) in [
+            (
+                "5-hour quota",
+                crate::providers::MetricWindow::Session,
+                config.notifications.codex_session_threshold,
+            ),
+            (
+                "Weekly quota",
+                crate::providers::MetricWindow::Long,
+                config.notifications.codex_weekly_threshold,
+            ),
+        ] {
+            let sub = Submenu::new(t(label), true);
+            let mut values = vec![
+                None,
+                Some(50),
+                Some(70),
+                Some(80),
+                Some(90),
+                Some(95),
+                Some(100),
+            ];
+            if let Some(value) = configured {
+                if !values.contains(&Some(value.min(100))) {
+                    values.push(Some(value.min(100)));
+                }
+            }
+            for value in values {
+                let label = value
+                    .map(|v| crate::tr!("{percent}% used", percent = v))
+                    .unwrap_or_else(|| t("Use provider threshold").to_string());
+                let item =
+                    CheckMenuItem::new(label, true, value == configured.map(|v| v.min(100)), None);
+                sub.append(&item)?;
+                alert_items.push((item, window, value));
+            }
+            notifications_menu.append(&sub)?;
+        }
+        let diagnostics_item = MenuItem::new(t("Diagnostics…"), true, None);
+
         let quota_item = MenuItem::new(t("View quota"), true, None);
         let more = Submenu::new(t("More"), true);
         more.append(&indicator_submenu)?;
@@ -284,10 +339,12 @@ impl ContextMenu {
         more.append(&PredefinedMenuItem::separator())?;
         more.append(&auto_update_item)?;
         more.append(&interval_submenu)?;
+        more.append(&notifications_menu)?;
         more.append(&PredefinedMenuItem::separator())?;
         more.append(&providers_submenu)?;
         more.append(&language_submenu)?;
         more.append(&proxy_submenu)?;
+        more.append(&diagnostics_item)?;
         menu.append(&quota_item)?;
         menu.append(&appearance_item)?;
         menu.append(&lock_item)?;
@@ -320,6 +377,9 @@ impl ContextMenu {
             indicator_items,
             display_items,
             auto_update_item,
+            notifications_item,
+            alert_items,
+            diagnostics_item,
             interval_items,
             provider_toggles,
             auth_method_items,
@@ -333,6 +393,17 @@ impl ContextMenu {
 
     /// Map a menu event id to an action.
     pub fn action_for(&self, event_id: &muda::MenuId) -> Option<MenuAction> {
+        if *event_id == self.notifications_item.id() {
+            return Some(MenuAction::ToggleNotifications);
+        }
+        if *event_id == self.diagnostics_item.id() {
+            return Some(MenuAction::OpenDiagnostics);
+        }
+        for (item, window, threshold) in &self.alert_items {
+            if *event_id == item.id() {
+                return Some(MenuAction::SetQuotaAlertThreshold(*window, *threshold));
+            }
+        }
         if *event_id == self.quota_item.id() {
             return Some(MenuAction::OpenQuota);
         }
@@ -413,6 +484,17 @@ impl ContextMenu {
 
     /// Sync the checkmarks with the config.
     pub fn sync(&self, config: &Config) {
+        self.notifications_item
+            .set_checked(config.notifications.enabled);
+        for (item, window, threshold) in &self.alert_items {
+            let selected = match window {
+                crate::providers::MetricWindow::Session => {
+                    config.notifications.codex_session_threshold
+                }
+                crate::providers::MetricWindow::Long => config.notifications.codex_weekly_threshold,
+            };
+            item.set_checked(*threshold == selected.map(|v| v.min(100)));
+        }
         for (item, language) in &self.language_items {
             item.set_checked(*language == config.general.language);
         }

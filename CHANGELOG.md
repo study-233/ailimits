@@ -2,6 +2,24 @@
 
 Notable, user-visible changes. Dates are release dates.
 
+## 0.4.0 - 2026-09-19
+
+- 修复 Codex 换号后请求失败沿用旧账号额度；启动缓存需确认账号后显示。
+- 任务栏稳定状态复用绘制结果，移动时复用像素；保留显隐、缩放、主题和失败重试检查。
+- 配置、缓存和历史统一串行保存，退出前限时等待最终快照。
+- 5 小时和每周额度独立提醒、独立阈值和冷却；新增可复制的中英文脱敏诊断报告。
+- 网站、隐私说明和下载入口统一为 QuotaBar，保留上游署名。
+- Account-checked Codex error fallback, cached taskbar rendering, serialized persistence with final flush, independent quota alerts, safe diagnostics and corrected fork download links.
+
+### English
+
+- Fixed Codex account switching so a failed request cannot reuse another account's cached quota; startup waits for account confirmation before showing a Codex disk snapshot.
+- Reused stable taskbar pixels during placement checks, while preserving invalidation for quota, theme, size, interaction, hiding and failed presentation.
+- Unified configuration, provider-cache and quota-history persistence behind serialized snapshot writers with bounded final saves during normal event-loop shutdown.
+- Added independent 5-hour and weekly alert thresholds and cooldowns, with `AILIMITS_WINDOW` for window-specific hooks.
+- Added a bilingual diagnostics action that reports safe categories and recovery advice without tokens, emails, account identifiers, paths, proxy addresses or raw error text.
+- Updated the QuotaBar site, privacy text, PAD metadata and download links; retained upstream attribution and installation/configuration compatibility.
+
 ## 0.3.0 - 2026-09-17
 
 ### 中文
