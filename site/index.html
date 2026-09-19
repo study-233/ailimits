@@ -3,101 +3,52 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="google-site-verification" content="wndZkr4zX21cQuq8hR7TiBEZFOgL741CfEteTvg5ZOU">
-<title>AI Limits – Claude, Codex &amp; Copilot usage limits on your Windows desktop</title>
-<meta name="description" content="A native Windows 11 widget that shows how much of your Claude, Codex, Copilot and Antigravity limits is used and when each window resets. No API keys, open source.">
-<link rel="canonical" href="https://napxlexn.github.io/ailimits/">
+<title>QuotaBar – Codex quota on your Windows taskbar</title>
+<meta name="description" content="A lightweight native Windows 11 taskbar tool for Codex weekly and 5-hour remaining quota, with rings, bars, local history and configurable details.">
+<link rel="canonical" href="https://study-233.github.io/ailimits/">
 <link rel="icon" type="image/png" href="./media/favicon.png">
 <link rel="apple-touch-icon" href="./media/apple-touch-icon.png">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="AI Limits">
-<meta property="og:title" content="AI Limits – your AI usage limits, live on the Windows desktop">
-<meta property="og:description" content="Claude, Codex, Copilot and Antigravity limits in one acrylic widget. Reads your existing CLI logins, no API keys. Free and open source.">
-<meta property="og:url" content="https://napxlexn.github.io/ailimits/">
-<meta property="og:image" content="https://napxlexn.github.io/ailimits/media/og.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="QuotaBar">
+<meta property="og:title" content="QuotaBar – Codex quota, at a glance">
+<meta property="og:description" content="Weekly and 5-hour remaining quota on your Windows 11 taskbar. Native rings, bars and a configurable quota panel. Free and open source.">
+<meta property="og:url" content="https://study-233.github.io/ailimits/">
+<meta property="og:image" content="https://study-233.github.io/ailimits/media/quota-styles.png">
+<meta property="og:image:alt" content="QuotaBar rings and bars in light and dark themes, showing demonstration values">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="AI Limits – your AI usage limits, live on the Windows desktop">
-<meta name="twitter:description" content="Claude, Codex, Copilot and Antigravity limits in one acrylic widget. No API keys. Free and open source.">
-<meta name="twitter:image" content="https://napxlexn.github.io/ailimits/media/og.png">
+<meta name="twitter:title" content="QuotaBar – Codex quota, at a glance">
+<meta name="twitter:description" content="A native Windows 11 taskbar tool for weekly and 5-hour remaining quota.">
+<meta name="twitter:image" content="https://study-233.github.io/ailimits/media/quota-styles.png">
 <meta name="theme-color" content="#0a0c0e">
-<link rel="preload" as="image" href="./media/wall.jpg" fetchpriority="high">
-<script>
-/* The wallpaper is the last thing to arrive, and until it does the page is a
-   dark rectangle with the rings already drawn on it — which reads as a
-   different, older site for the half-second it lasts. The world waits for the
-   image and then fades in; before that there is only the base colour. */
-document.documentElement.classList.add("js");
-(function () {
-  var i = new Image();
-  var done = function () { document.documentElement.classList.add("wall-in"); };
-  i.onload = function () { (i.decode ? i.decode().catch(done) : Promise.resolve()).then(done); };
-  i.onerror = done;
-  i.src = "./media/wall.jpg";
-  setTimeout(done, 2500);              /* never leave the world hidden */
-})();
-</script>
+<link rel="preload" as="image" href="./media/wall.jpg">
 <link rel="stylesheet" href="./site.css">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "name": "AI Limits",
-  "operatingSystem": "Windows 11",
+  "name": "QuotaBar",
+  "operatingSystem": "Windows 11 x64",
   "applicationCategory": "UtilitiesApplication",
-  "softwareVersion": "0.6.4",
-  "description": "A native Windows 11 desktop widget that shows live usage limits for Claude, OpenAI Codex, GitHub Copilot and Google Antigravity: session and weekly windows, reset countdowns, and a choice of tray-icon or taskbar-panel indicator.",
-  "url": "https://napxlexn.github.io/ailimits/",
-  "downloadUrl": "https://github.com/napxlexn/ailimits/releases/latest",
-  "image": "https://napxlexn.github.io/ailimits/media/og.png",
-  "license": "https://www.gnu.org/licenses/gpl-3.0.html",
-  "author": { "@type": "Person", "name": "napxlexn", "url": "https://github.com/napxlexn" },
+  "softwareVersion": "0.4.0",
+  "description": "A native Windows 11 taskbar tool for Codex weekly and 5-hour remaining quota, with rings, bars, configurable details and account-isolated local history.",
+  "url": "https://study-233.github.io/ailimits/",
+  "downloadUrl": "https://github.com/study-233/ailimits/releases/latest",
+  "image": "https://study-233.github.io/ailimits/media/quota-styles.png",
+  "license": "https://github.com/study-233/ailimits/blob/master/LICENSE",
+  "author": { "@type": "Person", "name": "study-233", "url": "https://github.com/study-233" },
+  "isBasedOn": "https://github.com/napxlexn/ailimits",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
 </script>
-<!-- Google dropped FAQ rich results on 2026-05-07, so this earns no snippet
-     there any more. It stays because other engines and the answer models
-     still read it, and because the questions themselves are the page's
-     long-tail surface either way. -->
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  "mainEntity": [
-    { "@type": "Question", "name": "How do I check my Claude Code session and weekly limit?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Install AI Limits and log in to Claude Code as usual. The widget reads the Claude Code login on your machine and shows the 5-hour session, the weekly window and the weekly Opus and Sonnet windows with live percentages and reset countdowns. Nothing to configure." } },
-    { "@type": "Question", "name": "Does AI Limits need API keys?",
-      "acceptedAnswer": { "@type": "Answer", "text": "No. It reads the logins your CLI tools already have: Claude Code, Codex CLI, the gh CLI and the Antigravity CLI session. The tokens are used read-only and never rotated, so your tools stay logged in. API keys are an optional extra path, stored in Windows Credential Manager, never in a config file." } },
-    { "@type": "Question", "name": "Which AI providers are supported?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Claude (Anthropic), OpenAI Codex via a ChatGPT subscription, GitHub Copilot including premium requests, and Google Antigravity. Each one can be toggled from the context menu; disabled providers make no network requests." } },
-    { "@type": "Question", "name": "Does it slow the PC down?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Measured, not estimated: an automated audit of the release build records about 0.005% of one CPU core, no GPU engine time at all, a working set around 37 MB and no raised timer resolution. Polling pauses after five minutes without input, and while the workstation is locked." } },
-    { "@type": "Question", "name": "Is AI Limits free?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Open source under GPL-3.0; the code, releases and issue tracker live on GitHub." } },
-    { "@type": "Question", "name": "Does it show GitHub Copilot premium requests?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes. The Copilot rows show the premium requests, chat and completions quotas with the date each one resets, read from the same endpoint the Copilot extensions use." } }
-  ]
-}
-</script>
 </head>
-<body>
-
+<body class="quotabar-site">
 <a class="skip" href="#install">Skip to install</a>
-
 <header class="top" aria-label="Site header">
-  <a class="brand" href="./"><img src="./media/favicon.png" alt="" width="22" height="22">AI&nbsp;Limits</a>
-  <nav class="top-links">
-    <a href="#playground">Playground</a>
-    <a href="#install">Install</a>
-    <a href="https://github.com/napxlexn/ailimits">GitHub</a>
+  <a class="brand" href="./"><img src="./media/favicon.png" alt="" width="22" height="22">QuotaBar</a>
+  <nav class="top-links" aria-label="Main navigation">
+    <a href="#details">Details</a><a href="#install">Install</a><a href="https://github.com/study-233/ailimits">GitHub</a>
   </nav>
 </header>
-
-<!-- The stack the whole site is made of, bottom to top:
-     the desktop wallpaper (the same one the reel lives on), the brand rings,
-     the under-cursor light, then ONE full-page acrylic sheet that frosts all
-     of it. Content sits on the sheet; cards are a second layer of glass. -->
 <div class="world" aria-hidden="true">
   <div class="wall"></div>
   <svg class="rings-bg" viewBox="0 0 1000 1000" fill="none">
@@ -105,351 +56,154 @@ document.documentElement.classList.add("js");
     <circle cx="500" cy="500" r="302" stroke="rgba(255,255,255,0.05)" stroke-width="24"></circle>
     <path d="M 500 80 A 420 420 0 1 1 340 531" stroke="rgba(255,255,255,0.13)" stroke-width="24" stroke-linecap="round"></path>
   </svg>
-  <svg class="rings-bg rings-alt" viewBox="0 0 1000 1000" fill="none">
-    <circle cx="500" cy="500" r="392" stroke="rgba(255,255,255,0.045)" stroke-width="16"></circle>
-    <circle cx="500" cy="500" r="286" stroke="rgba(255,255,255,0.04)" stroke-width="34"></circle>
-    <circle cx="500" cy="500" r="462" stroke="rgba(255,255,255,0.03)" stroke-width="7"></circle>
-    <path d="M 500 108 A 392 392 0 0 1 838 690" stroke="rgba(255,255,255,0.085)" stroke-width="16" stroke-linecap="round"></path>
-    <path d="M 236 758 A 392 392 0 0 1 152 420" stroke="rgba(255,255,255,0.05)" stroke-width="16" stroke-linecap="round"></path>
-    <path d="M 214 500 A 286 286 0 0 1 430 221" stroke="rgba(255,255,255,0.075)" stroke-width="34" stroke-linecap="round"></path>
-    <path d="M 869 620 A 462 462 0 0 1 560 959" stroke="rgba(255,255,255,0.09)" stroke-width="7" stroke-linecap="round"></path>
-    <path d="M 500 320 A 180 180 0 0 1 655 590" stroke="rgba(255,255,255,0.05)" stroke-width="12" stroke-linecap="round"></path>
-  </svg>
-  <svg class="rings-bg rings-far" viewBox="0 0 1000 1000" fill="none">
-    <circle cx="500" cy="500" r="430" stroke="rgba(255,255,255,0.028)" stroke-width="6"></circle>
-    <path d="M 500 70 A 430 430 0 0 1 872 715" stroke="rgba(255,255,255,0.065)" stroke-width="6" stroke-linecap="round"></path>
-    <path d="M 245 810 A 430 430 0 0 1 82 400" stroke="rgba(255,255,255,0.042)" stroke-width="26" stroke-linecap="round"></path>
-  </svg>
 </div>
 <div class="sheet" aria-hidden="true"></div>
-<canvas class="fx-tokens" aria-hidden="true"></canvas>
 <div class="grain-top" aria-hidden="true"></div>
-
-<!-- section rail: mirrors the scroll position -->
 <nav class="rail" aria-label="Sections">
-  <a href="#hero" data-rail="hero"><i>00</i>Hero</a>
-  <a href="#shapes" data-rail="shapes"><i>01</i>Shapes</a>
-  <a href="#providers" data-rail="providers"><i>02</i>Sources</a>
-  <a href="#telemetry" data-rail="telemetry"><i>03</i>Telemetry</a>
-  <a href="#taskbar" data-rail="taskbar"><i>04</i>Taskbar</a>
-  <a href="#playground" data-rail="playground"><i>05</i>Playground</a>
-  <a href="#install" data-rail="install"><i>06</i>Install</a>
+  <a href="#hero"><i>00</i>QuotaBar</a><a href="#details"><i>01</i>Details</a>
+  <a href="#preferences"><i>02</i>Preferences</a><a href="#sources"><i>03</i>Sources</a><a href="#install"><i>04</i>Install</a>
 </nav>
-
 <main>
-
-<!-- ════ 00 · HERO: the widget up close, its real variants around it ════ -->
 <section class="scene hero-s" id="hero">
   <div class="hero-grid">
     <div class="hero-copy">
-      <p class="hud">AI LIMITS · v0.6.4 · WINDOWS 11</p>
-      <h1 class="manifesto">
-        <span class="line">Know your limits.</span>
-        <span class="line typed" data-type="Before they know you.">Before they know you.</span><span class="caret" aria-hidden="true"></span>
-      </h1>
-      <p class="lead">A native acrylic widget for Windows 11 that shows how much of your
-      Claude, Codex, Copilot and Antigravity limits you have used, and when every window resets.
-      It reads the logins your CLI tools already have. No API keys required.</p>
-      <div class="cmd" data-cmd>
-        <code>winget install napxlexn.AILimits</code>
-        <button type="button" aria-label="Copy install command">Copy</button>
-      </div>
-      <p class="hero-alt"><a class="hero-dl" href="#install"><svg class="dl-mark solid" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.6" y="1.6" width="6.1" height="6.1" rx="0.7"/><rect x="8.3" y="1.6" width="6.1" height="6.1" rx="0.7"/><rect x="1.6" y="8.3" width="6.1" height="6.1" rx="0.7"/><rect x="8.3" y="8.3" width="6.1" height="6.1" rx="0.7"/></svg>Installer</a></p>
-      <p class="hud hud-under">v0.6.4 · GPL-3.0 · <a href="https://github.com/napxlexn/ailimits">source</a></p>
+      <p class="hud">QUOTABAR · v0.4.0 · WINDOWS 11</p>
+      <h1 class="manifesto"><span class="line">Codex quota.</span><span class="line dim">At a glance.</span></h1>
+      <p class="lead">Keep your weekly and 5-hour remaining quota on the taskbar.
+      Choose colorful rings or bars, then click for reset times, local history and Token activity.
+      A lightweight native app with English and Simplified Chinese interfaces.</p>
+      <p class="hero-alt"><a class="hero-dl" href="#install">Download for Windows 11</a>
+        <a href="https://github.com/study-233/ailimits/blob/master/README.md" lang="zh-CN">简体中文说明</a></p>
+      <p class="hud hud-under">GPL-3.0-or-later · <a href="https://github.com/study-233/ailimits">Source</a></p>
     </div>
-    <div class="hero-stage" aria-label="The AI Limits widget, up close, with its layout variants around it">
-      <div class="aw sat sat-a" id="aw-sat-a" aria-hidden="true"></div>
-      <div class="aw sat sat-b" id="aw-sat-b" aria-hidden="true"></div>
-      <div class="aw main" id="aw-hero"></div>
-      <p class="hud stage-cap">SHOWN AT 150% · PORTED FROM THE APP'S OWN RENDERER</p>
-    </div>
+    <figure class="product-shot">
+      <img src="./media/quota-styles.png" alt="QuotaBar weekly, 5-hour and dual-period rings and bars, in light and dark themes" fetchpriority="high">
+      <figcaption>Actual renderer samples with demonstration values. Light theme on the left; dark on the right.</figcaption>
+    </figure>
   </div>
 </section>
-
-<!-- ════ 01 · SHAPES: one family at a time, main + variants together ════ -->
-<section class="scene shape" id="shapes" aria-label="The widget's layout families">
-  <div class="pin">
-    <div class="shape-side">
-      <p class="hud">01 · <span data-shape-hud>DETAIL LEVELS</span></p>
-      <h2 class="manifesto m-side"><span class="line">One widget.</span><span class="line dim">Every shape you work in.</span></h2>
-      <p class="shape-note" data-shape-note>Three detail levels, switched live from the context menu.</p>
+<section class="scene product-section" id="details">
+  <div class="product-grid">
+    <div>
+      <p class="hud scene-tag">01 · QUOTA DETAILS</p>
+      <h2 class="manifesto m-side"><span class="line">One click.</span><span class="line dim">The full picture.</span></h2>
+      <p class="lead">The detail panel has five independent modules: 5-hour quota, weekly quota,
+      reset opportunities, quota history and Token activity. Click again, click outside or press Esc to close.</p>
+      <p>History keeps 30 days of real local observations, separated by account. Click a chart for
+      current-cycle, 7-day or 30-day quota views; Token charts offer 7-day and 30-day views.</p>
+      <p>Missing readings stay missing. Stale data is muted and estimates carry <code>≈</code>.
+      A reset timestamp passing alone does not confirm that quota has refreshed.</p>
     </div>
-    <div class="shape-stage">
-      <div class="aw shape-main" id="aw-shape"></div>
-      <div class="shape-sats">
-        <figure><div class="aw" id="aw-shape-s1"></div><figcaption class="hud" data-cap-s1></figcaption></figure>
-        <figure><div class="aw" id="aw-shape-s2"></div><figcaption class="hud" data-cap-s2></figcaption></figure>
-      </div>
-    </div>
+    <figure class="product-shot panel-shot">
+      <img src="./media/quota-panel.png" alt="Native QuotaBar detail panel with five modules and demonstration data" loading="lazy">
+      <figcaption>Native panel with demonstration data. Module visibility and order are configurable.</figcaption>
+    </figure>
   </div>
 </section>
-
-<!-- ════ 02 · SOURCES ════ -->
-<section class="scene providers" id="providers" aria-label="Supported providers">
+<section class="scene product-section" id="preferences">
+  <div class="product-grid">
+    <div>
+      <p class="hud scene-tag">02 · YOUR TASKBAR</p>
+      <h2 class="manifesto m-side"><span class="line">Rings or bars.</span><span class="line dim">Your choice.</span></h2>
+      <p class="lead">Show the week, 5 hours or both. Dual rings put 5 hours outside and the week inside.
+      The taskbar and tray share your selected style, periods and colors.</p>
+      <p>Right-click for <strong>Appearance settings…</strong>. The Taskbar appearance and Panel content pages
+      have live preview, Save and Cancel. Drag modules or use the up/down buttons to reorder them.</p>
+      <p>Drag the panel horizontally, lock its position or restore automatic placement. It follows Windows
+      themes, DPI, taskbar auto-hide and full-screen visibility. The tray is an explicit menu choice.</p>
+    </div>
+    <figure class="product-shot">
+      <img src="./media/panel-settings.png" alt="QuotaBar native panel-content settings in Simplified Chinese, showing module visibility and ordering controls" loading="lazy">
+      <figcaption>Separate panel settings, shown in Simplified Chinese. English is also available.</figcaption>
+    </figure>
+  </div>
+</section>
+<section class="scene providers" id="sources">
   <div class="prov-head">
-    <p class="hud scene-tag">02 · SOURCES</p>
-    <h2 class="manifesto"><span class="line">Four providers.</span><span class="line dim">Zero API keys.</span></h2>
-    <p class="lead">It reads each tool's existing login. Read-only. Never rotates a token,
-    so your CLIs stay signed in.</p>
+    <p class="hud scene-tag">03 · SOURCES &amp; STORAGE</p>
+    <h2 class="manifesto"><span class="line">Native.</span><span class="line dim">Local by design.</span></h2>
+    <p class="lead">Rust, Win32 and CPU vector drawing. No WebView, bundled fonts or continuous app animation.
+    Both quota periods reuse existing requests.</p>
   </div>
   <div class="panes">
     <article class="pane glass"><div class="body">
-      <p class="hud">SRC · CLAUDE CODE LOGIN</p>
-      <h3>Claude</h3>
-      <p>The live server-side percentages for every window, the same numbers <code>/usage</code> shows.</p>
-      <p class="windows">5-hour session · weekly · Opus · Sonnet</p></div>
-    </article>
+      <p class="hud">CODEX CLI LOGIN</p><h3>Existing authentication</h3>
+      <p>Sign in with the official Codex CLI. Base quota requests read its existing credentials without refreshing or rotating them.</p>
+    </div></article>
     <article class="pane glass"><div class="body">
-      <p class="hud">SRC · CODEX CLI LOGIN</p>
-      <h3>OpenAI Codex</h3>
-      <p>Session and weekly windows from your ChatGPT subscription, with reset times.</p>
-      <p class="windows">5-hour session · weekly</p></div>
-    </article>
+      <p class="hud">OPTIONAL EXTENSIONS</p><h3>More detail on demand</h3>
+      <p>Enabled reset and Token modules use the local official Codex App Server, which manages its own authentication.
+      Reads verify the account, cache for five minutes and clean up the helper afterward.</p>
+    </div></article>
     <article class="pane glass"><div class="body">
-      <p class="hud">SRC · GH CLI / PAT</p>
-      <h3>GitHub Copilot</h3>
-      <p>The same quotas the Copilot extensions read, including the date each one resets.</p>
-      <p class="windows">premium requests · chat · completions</p></div>
-    </article>
+      <p class="hud">ACCOUNT-ISOLATED HISTORY</p><h3>30 days on your PC</h3>
+      <p>Quota observations stay local and continue while their module is hidden. No pre-installation quota history is fabricated;
+      missing Token dates are different from zero.</p>
+    </div></article>
     <article class="pane glass"><div class="body">
-      <p class="hud">SRC · ANTIGRAVITY SESSION</p>
-      <h3>Google Antigravity</h3>
-      <p>The shared model pools Antigravity actually meters.</p>
-      <p class="windows">Gemini pool · Claude/GPT pool</p></div>
-    </article>
+      <p class="hud">EXISTING INTEGRATIONS</p><h3>Other providers</h3>
+      <p>Claude, Copilot and Antigravity integrations remain available. This version’s taskbar and tray presentation focuses on Codex.</p>
+    </div></article>
   </div>
 </section>
-
-<!-- ════ 03 · TELEMETRY ════ -->
-<section class="scene telemetry" id="telemetry" aria-label="Measured footprint">
-  <p class="ghost" aria-hidden="true"><b data-count="0.005" data-decimals="3">0.005</b>%</p>
-  <div class="tele-head">
-    <p class="hud scene-tag">03 · TELEMETRY</p>
-    <h2 class="manifesto"><span class="line">Measured.</span><span class="line dim">Not promised.</span></h2>
-    <p class="hud">AUDIT 2026-08-23 · RELEASE-MIN BUILD · ELEVATED</p>
-  </div>
-  <div class="numbers">
-    <div class="num"><b data-count="0.005" data-decimals="3">0.005</b><i>%</i><span>of one CPU core at idle</span></div>
-    <div class="num"><b data-count="0.00" data-decimals="2">0.00</b><i>%</i><span>GPU engine time — the UI is drawn on the CPU</span></div>
-    <div class="num"><b data-count="37" data-decimals="0">37</b><i>MB</i><span>working set</span></div>
-    <div class="num"><b data-count="3.7" data-decimals="1">3.7</b><i>MB</i><span>installer, no runtime dependencies</span></div>
-  </div>
-  <div class="honesty">
-    <p class="hud">HONEST DISPLAY STATES · LIVE</p>
-    <div class="aw" id="aw-honesty"></div>
-    <p class="honesty-note">When a source is down, old data turns grey and shows its age.
-    A window that has provably reset shows an ≈0% estimate, marked as an estimate. It never pretends.</p>
-  </div>
-</section>
-
-<!-- ════ 04 · TASKBAR: the real corner, real pixels ════ -->
-<section class="scene taskbar" id="taskbar" aria-label="Taskbar indicators">
-  <div class="tb-scrub">
-    <div class="tb-stage" data-tb-stage>
-      <div class="tb-head">
-        <p class="hud scene-tag">04 · TASKBAR</p>
-        <h2 class="manifesto"><span class="line">Hide the widget.</span><span class="line dim">Keep the signal.</span></h2>
-        <p class="lead">Closed, it does not go away — it moves into the taskbar. Here it is taken apart:
-        the bar, our tray icon integrated into the system row, the mini panel living as its own window
-        above it, and the tooltip on top. Scroll to fill the limits and put it back together;
-        hover a layer for what it&nbsp;is.</p>
-      </div>
-      <div class="tb-rig" data-tb-rig>
-        <div class="tb-plate"><canvas class="tb-bar" data-tb-note="&lt;b&gt;The taskbar itself.&lt;/b&gt; Real renderer pixels: the system tray, the language, the clock. The empty slot in the icon row is where our tray icon sits — lifted one layer up here."></canvas></div>
-        <div class="tb-plate"><canvas class="tb-tic" data-tb-note="&lt;b&gt;The tray icon.&lt;/b&gt; INTEGRATED into the system row, so it sits closest to the bar and is built differently from the panel: two rings, the outer one the first provider, the inner one the second."></canvas></div>
-        <div class="tb-plate"><div class="tb-panel" data-tb-note="&lt;b&gt;The mini panel.&lt;/b&gt; Its OWN window over the taskbar, right beside the tray: the top two providers, a percentage and a bar. The background is transparent — it is a separate object, not part of the bar.">
-          <div class="tb-row"><span class="tb-pv" data-tb-pv="0">0%</span><span class="tb-pill"><i data-tb-pb="0"></i></span></div>
-          <div class="tb-row r1"><span class="tb-pv" data-tb-pv="1">0%</span><span class="tb-pill"><i data-tb-pb="1"></i></span></div>
-        </div></div>
-        <div class="tb-plate"><div class="tb-tipbox" data-tb-note="&lt;b&gt;The tooltip.&lt;/b&gt; Hovering the panel in the bar lists all four providers in one line. Its numbers are the same ones the panel bars and the icon rings are showing.">Claude <span data-tb-tn="0">0%</span> · Codex <span data-tb-tn="1">0%</span> · Copilot <span data-tb-tn="2">0%</span> · Antigravity <span data-tb-tn="3">0%</span></div></div>
-      </div>
-      <svg class="tb-csvg" data-tb-csvg aria-hidden="true"><polyline data-tb-cline points=""></polyline></svg>
-      <p class="tb-name" data-tb-name aria-hidden="true"></p>
-      <p class="tb-tag" data-tb-tag="0">taskbar</p>
-      <p class="tb-tag" data-tb-tag="1">tray icon</p>
-      <p class="tb-tag" data-tb-tag="2">panel</p>
-      <p class="tb-tag" data-tb-tag="3">tooltip</p>
-      <div class="tb-note" data-tb-notebox aria-hidden="true"></div>
-    </div>
-  </div>
-</section>
-
-<!-- ════ 05 · PLAYGROUND ════ -->
-<section class="scene playground" id="playground" aria-label="Interactive playground">
-  <div class="pg-head">
-    <p class="hud scene-tag">05 · PLAYGROUND</p>
-    <h2 class="manifesto"><span class="line">Touch it</span><span class="line dim">before you install it.</span></h2>
-    <p class="lead">These are the widget's real options, not a mock-up. Drag&nbsp;it. Recolor&nbsp;it. Reshape&nbsp;it.</p>
-  </div>
-  <div class="pg">
-    <div class="pg-rail glass" role="group" aria-label="Widget options">
-      <div class="pg-group"><p class="hud">DETAIL</p>
-        <div class="seg" data-opt="detail">
-          <button type="button" data-v="compact">Compact</button>
-          <button type="button" data-v="medium" aria-pressed="true">Medium</button>
-          <button type="button" data-v="expanded">Expanded</button>
-        </div>
-      </div>
-      <div class="pg-group"><p class="hud">LAYOUT</p>
-        <div class="seg" data-opt="layout">
-          <button type="button" data-v="rows" aria-pressed="true">Rows</button>
-          <button type="button" data-v="cols-row">Columns</button>
-          <button type="button" data-v="cols-column">Stacked</button>
-        </div>
-      </div>
-      <div class="pg-group" data-only="rows"><p class="hud">WIDTH</p>
-        <div class="seg" data-opt="width">
-          <button type="button" data-v="full" aria-pressed="true">100%</button>
-          <button type="button" data-v="threequarters">75%</button>
-          <button type="button" data-v="half">50%</button>
-        </div>
-      </div>
-      <div class="pg-group"><p class="hud">PALETTE</p>
-        <div class="seg seg-wrap" data-opt="palette">
-          <button type="button" data-v="mono" aria-pressed="true">Mono</button>
-          <button type="button" data-v="default">Default</button>
-          <button type="button" data-v="ocean">Ocean</button>
-          <button type="button" data-v="sunset">Sunset</button>
-          <button type="button" data-v="forest">Forest</button>
-          <button type="button" data-v="neon">Neon</button>
-          <button type="button" data-v="ice">Ice</button>
-          <button type="button" data-v="rose">Rose</button>
-          <button type="button" data-v="slate">Slate</button>
-        </div>
-      </div>
-      <div class="pg-group"><p class="hud">OPACITY <output data-out="opacity">45</output>%</p>
-        <input type="range" min="15" max="85" step="5" value="45" data-opt-range="opacity" aria-label="Background opacity">
-      </div>
-      <div class="pg-group"><p class="hud">BRIGHTNESS <output data-out="brightness">100</output>%</p>
-        <input type="range" min="40" max="100" step="20" value="100" data-opt-range="brightness" aria-label="Brightness">
-      </div>
-      <div class="pg-group"><p class="hud">SATURATION <output data-out="saturation">55</output>%</p>
-        <input type="range" min="0" max="100" step="25" value="55" data-opt-range="saturation" aria-label="Saturation">
-      </div>
-      <div class="pg-group"><p class="hud">DESKTOP</p>
-        <div class="pg-wall">
-          <label class="pg-file">
-            <input type="file" accept="image/*" data-desk-file>
-            <span>Use my wallpaper</span>
-          </label>
-          <button type="button" class="pg-reset" data-desk-reset hidden>Reset</button>
-        </div>
-        <p class="pg-note">Drop a picture on the glass or paste one. It is read in your
-        browser and goes nowhere.</p>
-      </div>
-    </div>
-    <div class="pg-desk" data-pg-desk>
-      <p class="hud pg-hint" aria-hidden="true">DRAG ANYWHERE ON THE GLASS</p>
-      <p class="pg-drop" data-desk-drop aria-hidden="true">Drop it here</p>
-      <div class="aw" id="aw-play" data-drag></div>
-    </div>
-  </div>
-</section>
-
-<!-- ════ 06 · INSTALL ════ -->
-<section class="scene finale" id="install" aria-label="Install">
-  <div class="fin-icon" aria-hidden="true">
-    <img src="./media/apple-touch-icon.png" alt="The AI Limits widget icon" width="96" height="96">
-  </div>
-  <h2 class="manifesto m-center"><span class="line">One command.</span></h2>
-  <div class="term glass" data-term>
-    <div class="term-bar">
-      <div class="term-tabs" role="tablist" aria-label="Ways to install">
-        <button type="button" class="term-tab" role="tab" id="tab-winget" aria-selected="true"
-          aria-controls="term-panel" data-term-cmd="winget install napxlexn.AILimits">
-          <svg class="tab-mark" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.4"/><path d="M1.8 6.6h12.4M8 2.8v3.8"/></svg><span class="tab-label">winget</span></button>
-        <button type="button" class="term-tab" role="tab" id="tab-ps" aria-selected="false" tabindex="-1"
-          aria-controls="term-panel" data-term-cmd="irm https://raw.githubusercontent.com/napxlexn/ailimits/master/install.ps1 | iex">
-          <svg class="tab-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 2.8 8.4 8l-5.8 5.2"/><path d="M9.4 13.2h4"/></svg><span class="tab-label">PowerShell</span></button>
-        <button type="button" class="term-tab" role="tab" id="tab-scoop" aria-selected="false" tabindex="-1"
-          aria-controls="term-panel" data-term-cmd="scoop bucket add ailimits https://github.com/napxlexn/scoop-ailimits; scoop install ailimits">
-          <svg class="tab-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.9 6.2h12.2l-1.5 7.6H3.4z"/><path d="M4.8 6.2c0-3.4 6.4-3.4 6.4 0"/></svg><span class="tab-label">Scoop</span></button>
-        <button type="button" class="term-tab" role="tab" id="tab-choco" aria-selected="false" tabindex="-1"
-          aria-controls="term-panel" data-term-cmd="choco install ailimits">
-          <svg class="tab-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.6 2H11.6A2.4 2.4 0 0 0 14 4.4V11.4A2.6 2.6 0 0 1 11.4 14H4.6A2.6 2.6 0 0 1 2 11.4V4.6A2.6 2.6 0 0 1 4.6 2Z"/><path d="M5.9 6.5V7.3M10.1 6.5V7.3" stroke-width="1.5"/><path d="M5.3 9.7Q8 12.1 10.7 9.7"/></svg><span class="tab-label">Chocolatey</span></button>
-      </div>
-      <span class="term-plus" aria-hidden="true">
-        <svg viewBox="0 0 10 10"><path d="M5 .5v9M.5 5h9"/></svg></span>
-      <span class="term-win" aria-hidden="true">
-        <i><svg viewBox="0 0 10 10"><path d="M.5 5h9"/></svg></i>
-        <i><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1"/></svg></i>
-        <i><svg viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></i>
-      </span>
-    </div>
-    <div class="term-body" id="term-panel" role="tabpanel" aria-labelledby="tab-winget">
-      <span class="term-line"><span class="term-ps">PS C:\&gt;</span>
-      <code class="typed" data-type="winget install napxlexn.AILimits">winget install napxlexn.AILimits</code><span class="caret" aria-hidden="true"></span></span>
-      <button type="button" class="term-copy" data-copy-cmd aria-label="Copy install command">Copy</button>
-    </div>
-  </div>
+<section class="scene finale" id="install">
+  <p class="hud scene-tag">04 · INSTALL</p>
+  <div class="fin-icon" aria-hidden="true"><img src="./media/apple-touch-icon.png" alt="" width="96" height="96"></div>
+  <h2 class="manifesto m-center"><span class="line">Start with Codex.</span></h2>
+  <p class="install-intro">Sign in with the official Codex CLI, then launch <code>ailimits.exe</code>.</p>
   <div class="dl">
-    <p class="hud dl-or">or take the file</p>
     <div class="dl-row">
-      <a class="dl-card dl-main" href="https://github.com/napxlexn/ailimits/releases/download/v0.6.4/AiLimits-Setup-0.6.4.exe">
-        <span class="hud"><svg class="dl-mark solid" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.6" y="1.6" width="6.1" height="6.1" rx="0.7"/><rect x="8.3" y="1.6" width="6.1" height="6.1" rx="0.7"/><rect x="1.6" y="8.3" width="6.1" height="6.1" rx="0.7"/><rect x="8.3" y="8.3" width="6.1" height="6.1" rx="0.7"/></svg>INSTALLER</span>
-        <b>Download for Windows 11</b>
-        <span class="dl-meta">AiLimits-Setup-0.6.4.exe &middot; 3.7 MB &middot; no admin rights</span>
+      <a class="dl-card dl-main" href="https://github.com/study-233/ailimits/releases/latest">
+        <span class="hud">INSTALLER · WINDOWS 11 X64</span><b>Get QuotaBar from Releases</b>
+        <span class="dl-meta">QuotaBar-Setup-&lt;version&gt;.exe · per-user install · automatic updates</span>
       </a>
-      <a class="dl-card" href="https://github.com/napxlexn/ailimits/releases/download/v0.6.4/AiLimits-Portable-0.6.4.zip">
-        <span class="hud"><svg class="dl-mark" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10.2" rx="1.3"/><path d="M1.8 6.2h12.4"/><path d="M8 3v3.2M8 7.9v1.3M8 10.6v1.3"/></svg>PORTABLE</span>
-        <b>Zip, nothing installed</b>
-        <span class="dl-meta">AiLimits-Portable-0.6.4.zip &middot; 3.0 MB &middot; unpack and run</span>
+      <a class="dl-card" href="https://github.com/study-233/ailimits/releases/latest">
+        <span class="hud">PORTABLE · WINDOWS 11 X64</span><b>Extract and run</b>
+        <span class="dl-meta">QuotaBar-Portable-&lt;version&gt;.zip · manual updates</span>
       </a>
     </div>
-    <p class="dl-note">Both are the v0.6.4 release build, the same one winget, Scoop and the
-    one-liner fetch. <a href="https://github.com/napxlexn/ailimits/releases/latest">All releases
-    and checksums</a>.</p>
+    <p class="dl-note">This page describes v0.4.0. Public downloads follow the versions actually published on
+    <a href="https://github.com/study-233/ailimits/releases">Releases</a>. Verify downloads with <code>SHA256SUMS.txt</code>.</p>
   </div>
-
   <div class="alt-installs">
-    <details>
-      <summary>Prefer no install at all?</summary>
-      <div class="alt-grid">
-        <div><p class="hud">PORTABLE ZIP</p>
-          <p>On every <a href="https://github.com/napxlexn/ailimits/releases/latest">release</a>:
-          the two executables, the licence and trademark notices, and the README. Nothing is
-          written outside the folder you unpack it into.</p></div>
-        <div><p class="hud">WHAT THE ONE-LINER DOES</p>
-          <p>The PowerShell tab downloads the installer for the latest release and checks it
-          against the SHA-256 digest GitHub publishes for that asset before running it.</p></div>
-      </div>
+    <details><summary>Install with PowerShell</summary>
+      <div class="alt-grid"><div>
+        <p>The bootstrap script downloads the latest published installer and verifies its SHA-256 before running it.</p>
+        <div class="cmd install-command" data-cmd>
+          <code>irm https://raw.githubusercontent.com/study-233/ailimits/master/install.ps1 | iex</code>
+          <button type="button" aria-label="Copy PowerShell install command" aria-live="polite">Copy</button>
+        </div>
+      </div></div>
     </details>
   </div>
-
+  <p class="dl-note">QuotaBar is not published to winget, Scoop, Chocolatey or Microsoft Store.</p>
   <section class="faq" aria-label="Frequently asked questions">
-    <h2>Questions people actually ask</h2>
-    <details><summary>How do I check my Claude Code session and weekly limit?</summary>
-      <p>Install AI Limits and log in to Claude Code as usual. The widget reads the Claude Code login on your machine and shows the 5-hour session, the weekly window and the weekly Opus and Sonnet windows with live percentages and reset countdowns. Nothing to configure.</p></details>
-    <details><summary>Does it need API keys?</summary>
-      <p>No. It reads the logins your CLI tools already have: Claude Code, Codex CLI, the gh CLI and the Antigravity CLI session. The tokens are used read-only and never rotated, so your tools stay logged in. API keys are an optional extra path, stored in Windows Credential Manager, never in a config file.</p></details>
-    <details><summary>Which providers are supported?</summary>
-      <p>Claude (Anthropic), OpenAI Codex via a ChatGPT subscription, GitHub Copilot including premium requests, and Google Antigravity. Each one can be toggled from the context menu; disabled providers make no network requests.</p></details>
-    <details><summary>Does it slow the PC down?</summary>
-      <p>Measured, not estimated: an automated audit of the release build records about 0.005% of one CPU core, no GPU engine time at all, a working set around 37 MB and no raised timer resolution. Polling pauses after five minutes without input, and while the workstation is locked.</p></details>
-    <details><summary>Is it free?</summary>
-      <p>Yes. Open source under GPL-3.0; the code, releases and issue tracker live on <a href="https://github.com/napxlexn/ailimits">GitHub</a>.</p></details>
-    <details><summary>Does it show GitHub Copilot premium requests?</summary>
-      <p>Yes. The Copilot rows show the premium requests, chat and completions quotas with the date each one resets, read from the same endpoint the Copilot extensions use.</p></details>
-    <details><summary>What does the tray icon show?</summary>
-      <p>Two concentric rings: the busiest provider on the outer ring, the runner-up inside, both sweeping clockwise from 12 o'clock. A value too small for an arc becomes a dot, and only a true 100% closes the ring, so the shape never lies. It is one of two indicators: the alternative is the taskbar panel, which paints the first two providers onto the bar as digits and bars instead. You pick one from the Indicator submenu.</p></details>
+    <h2>Questions</h2>
+    <details><summary>Do the numbers mean used or remaining?</summary>
+      <p>Remaining. A full ring or bar means 100% remains; at 0% only the track remains. A missing 5-hour window shows <code>—</code>, without substituting the weekly quota.</p></details>
+    <details><summary>Where are my settings and history?</summary>
+      <p>Settings stay in <code>%APPDATA%\AiLimits\config.toml</code>, with the local cache and history beside them.
+      The executable remains <code>ailimits.exe</code> for compatibility. See the <a href="./privacy.html">privacy details</a>.</p></details>
+    <details><summary>Does it change CLI tokens or use reset opportunities?</summary>
+      <p>Base quota reads do not refresh or rotate CLI tokens. Optional extension reads use the official local Codex App Server,
+      which manages its own authentication. QuotaBar never starts login, logout or model turns, and never consumes reset opportunities.</p></details>
+    <details><summary>How do I upgrade an older installation?</summary>
+      <p>Install QuotaBar over the existing copy to retain settings, credentials and position. Old <code>0.6.4</code> development builds need a first manual upgrade.
+      Portable copies update manually. <a href="https://github.com/study-233/ailimits/blob/master/README.md">Read the upgrade notes</a>.</p></details>
+    <details><summary>Is this an official AI Limits or OpenAI product?</summary>
+      <p>No. QuotaBar is independently maintained by study-233 and based on <a href="https://github.com/napxlexn/ailimits">AI Limits by napxlexn</a>.
+      It uses its own name and icon and is free software under GPL-3.0-or-later.</p></details>
   </section>
-
   <footer>
-    <span>AI Limits · GPL-3.0 · built by <a href="https://github.com/napxlexn">napxlexn</a></span>
-    <span>
-      <a href="https://github.com/napxlexn/ailimits">Source</a> ·
-      <a href="https://github.com/napxlexn/ailimits/releases">Releases</a> ·
-      <a href="https://github.com/napxlexn/ailimits/blob/master/docs/en/PROVIDERS.md">How it reads each provider</a> ·
-      <a href="./privacy.html">Privacy</a>
-    </span>
+    <span>QuotaBar · maintained by <a href="https://github.com/study-233">study-233</a>.<br>
+      Based on <a href="https://github.com/napxlexn/ailimits">AI Limits</a> · original code © 2026 napxlexn.</span>
+    <span><a href="https://github.com/study-233/ailimits">Source</a> ·
+      <a href="https://github.com/study-233/ailimits/blob/master/LICENSE">GPL-3.0-or-later</a> ·
+      <a href="https://github.com/study-233/ailimits/blob/master/TRADEMARKS.md">Name and logo policy</a> ·
+      <a href="./privacy.html">Privacy</a></span>
   </footer>
 </section>
-
 </main>
-
-<script src="./vendor/gsap.min.js" defer></script>
-<script src="./vendor/ScrollTrigger.min.js" defer></script>
-<script src="./vendor/lenis.min.js" defer></script>
 <script src="./site.js" defer></script>
 </body>
 </html>

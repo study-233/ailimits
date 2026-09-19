@@ -2,7 +2,7 @@
 
 **把 Codex 余量放在任务栏上。** 轻量级 Windows 11 原生工具，用彩色圆环或横条查看每周与 5 小时剩余额度。
 
-[English](README.md) · [下载](https://github.com/study-233/ailimits/releases/latest) · [配置说明](docs/en/CONFIG.md) · [更新记录](CHANGELOG.md)
+[English](README.en.md) · [下载](https://github.com/study-233/ailimits/releases/latest) · [配置说明](docs/en/CONFIG.md) · [更新记录](CHANGELOG.md)
 
 ![QuotaBar 圆环与横条的深浅主题预览](docs/images/fluent-quota-styles.png)
 
@@ -17,6 +17,7 @@
 - **点击查看详情**：左键打开完整配额面板，默认显示 5 小时、每周、重置机会、额度历史和 Token 活动。面板模块独立于任务栏，可分别开关和排序。再次点击、点击外部或按 Esc 关闭，不再显示悬停提示。
 - **原生设置**：分为“任务栏外观”和“面板内容”。拖动手柄或使用上下按钮排列模块，实时预览，保存生效，取消回滚。隐藏模块保留位置，历史继续记录。
 - **保持轻量**：Rust + Win32 + CPU 矢量绘制，无 WebView、无字体下载、无持续动画；复用现有额度请求。
+- **独立提醒与诊断**：在“更多”中分别设置 5 小时／每周已用额度提醒阈值，查看失败原因并复制脱敏诊断报告。
 - **中英文界面**：跟随系统或手动切换；支持 Windows 静态系统代理和直连。
 
 ## 下载与安装
@@ -29,7 +30,7 @@
 | `QuotaBar-Portable-<版本>.zip` | 解压后运行 `ailimits.exe`，后续手动更新 |
 | `SHA256SUMS.txt` | 使用 `Get-FileHash <文件> -Algorithm SHA256` 校验 |
 
-v0.2.0 的构建产物采用 QuotaBar 名称；公开下载以 Releases 中实际发布的版本为准。此仓库未发布到 winget、Scoop、Chocolatey 或 Microsoft Store。
+v0.4.0 的构建产物采用 QuotaBar 名称；公开下载以 Releases 中实际发布的版本为准。此仓库未发布到 winget、Scoop、Chocolatey 或 Microsoft Store。
 
 从 v0.1.0 覆盖安装后，Windows 应用列表将显示 **QuotaBar**。原有配置、凭据和位置继续保留，旧名称快捷方式会清理。程序内部文件名仍为 `ailimits.exe`，配置仍在 `%APPDATA%\AiLimits\config.toml`。旧 `0.6.4` 开发版本需首次手动升级。
 
@@ -67,7 +68,7 @@ irm https://raw.githubusercontent.com/study-233/ailimits/master/install.ps1 | ie
 
 **灰色或 `≈` 是什么？** 灰色表示缺失、过期或估算状态，`≈` 表示估算。左键点击查看周期、状态和本地重置时间。仅凭重置时间已过，不能确认额度已恢复。
 
-**为什么旧版有 fork？** 旧安装器把它写进了应用名称。v0.2.0 改用独立名称 QuotaBar，覆盖安装即可更新显示名称。
+**为什么旧版有 fork？** 旧安装器把它写进了应用名称。v0.4.0 改用独立名称 QuotaBar，覆盖安装即可更新显示名称。
 
 **会修改 CLI 令牌吗？** 基础额度请求只读现有令牌。重置机会和每日 Token 按需调用本机官方 Codex App Server，由官方 CLI 管理自身认证；QuotaBar 不发起登录、登出或模型对话。手动设置的密钥仍存储在 Windows 凭据管理器。
 
@@ -89,7 +90,7 @@ cargo +stable-x86_64-pc-windows-msvc build --locked --profile release-min --bins
 产物位于 `target/release-min/`。使用 Inno Setup 6 构建安装器：
 
 ```powershell
-./tools/package-release.ps1 -Version 0.3.0 -Iscc 'C:\路径\ISCC.exe'
+./tools/package-release.ps1 -Version 0.4.0 -Iscc 'C:\路径\ISCC.exe'
 ```
 
 网络测试只使用本地模拟服务，不依赖真实令牌。渲染预览与原生设置验证说明见[开发验证](docs/en/VALIDATION.md)。
